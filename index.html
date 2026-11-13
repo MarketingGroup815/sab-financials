@@ -12,106 +12,128 @@
 <header class="topbar">
   <div class="brand">
     <span class="brand-badge">Sabino Canyon Spur</span>
-    <div class="brand-title">
-      <h1>2026 USAR Income Statement &amp; Audit Mapper</h1>
-      <p>Browser-Local Storage Engine &bull; Auto-Reconciles CSV / Excel Reports &bull; Month-over-Month FY Tracker, .XLSX &amp; .PDF</p>
-    </div>
+    <h1>2026 USAR P&amp;L Mapper</h1>
   </div>
   <div class="toolbar">
     <select id="savedReportsSelect" title="Switch saved report snapshot in localStorage"></select>
-    <button type="button" id="btnSaveSnapshot" class="btn-emerald" title="Save current report & mappings to browser localStorage">Save Snapshot</button>
-    <button type="button" id="btnRulesModal" title="Manage learned vendor rules, split templates & JSON backup">Rules (<span id="ruleCountBadge">0</span>) &bull; Templates (<span id="tplCountBadge">0</span>)</button>
-    <label for="fileInput" class="file-upload-btn">
-      Upload Report (.CSV / .XLSX)
+    <button type="button" id="btnSaveSnapshot" class="btn-emerald" title="Save current report & mappings to browser localStorage">Save</button>
+    <button type="button" id="btnRulesModal" title="Manage learned vendor rules, split templates & JSON backup">Rules (<span id="ruleCountBadge">0</span>) &bull; Tpl (<span id="tplCountBadge">0</span>)</button>
+    <label for="fileInput" class="file-upload-btn" title="Upload .CSV or .XLSX Management Report">
+      Upload Report
       <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" style="display:none;" />
     </label>
-    <button type="button" id="btnExportXlsx" class="btn-gold">Export 3-Tab Excel (.XLSX)</button>
-    <button type="button" id="btnExportPdf" class="btn-emerald">Export P&amp;L (.PDF)</button>
+    <button type="button" id="btnExportXlsx" class="btn-gold">Excel (.XLSX)</button>
+    <button type="button" id="btnExportPdf" class="btn-emerald">PDF</button>
   </div>
 </header>
 
 <main class="container">
-  <!-- Dropzone -->
-  <div class="dropzone" id="dropzone">
-    <div class="dropzone-info">
-      <strong>Drop Management_Report.csv or .xlsx here</strong> — <span>Automatically parses Income, COGS, OPEX, NonOPEX, Labour &amp; Debit Orders, applies saved 2026 GL rules &amp; recurring split templates, and slots into your Financial Year.</span>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <button type="button" id="btnLoadSample">Load Sample Report</button>
-      <button type="button" id="btnDeleteSnapshot" class="btn-danger-outline">Delete Current Snapshot</button>
-    </div>
-  </div>
-
-  <!-- Reconciliation & Period Strip -->
-  <div class="status-strip">
-    <div class="status-left">
-      <span id="activeReportName" style="font-weight:700;color:var(--accent-gold);">Active Report: Management_Report.csv (Sample)</span>
-      <label class="period-label" title="Assign the accounting month (YYYY-MM) for Month-over-Month tracking">
-        <span>Reporting Month:</span>
-        <input type="month" id="reportPeriodInput" class="period-picker" />
-      </label>
-      <span id="reconPill" class="pill pill-green">RECONCILED &bull; R 0.00 DIFF</span>
-      <span id="flagPill" class="pill pill-amber">0 ITEMS NEED REVIEW</span>
-    </div>
-    <div class="status-right">
-      <span style="font-size:11px;color:var(--text-secondary);">Tax Display Mode:</span>
-      <select id="vatModeSelect" style="padding:4px 8px;font-size:11px;">
-        <option value="INCL">Cashbook / VAT-Inclusive (Matches CSV Cent-for-Cent)</option>
-        <option value="EXCL">Accrual Preview: Strip 15% VAT on Vatable Lines</option>
-      </select>
-    </div>
-  </div>
-
-  <!-- 6-Card KPI Strip -->
-  <section class="kpi-grid">
-    <div class="kpi-card highlight">
-      <div class="kpi-label">Net Turnover</div>
-      <div class="kpi-value" id="kpiTurnover">R 0.00</div>
-      <div class="kpi-sub" id="kpiTurnoverPct">100.0% of Sales</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">Gross Profit (GP)</div>
-      <div class="kpi-value" id="kpiGP">R 0.00</div>
-      <div class="kpi-sub" id="kpiGPPct">0.0% Margin (COGS 0.0%)</div>
-    </div>
-    <div class="kpi-card warn">
-      <div class="kpi-label">Prime Cost (COGS + Labour)</div>
-      <div class="kpi-value" id="kpiPrime">R 0.00</div>
-      <div class="kpi-sub" id="kpiPrimePct">0.0% of Turnover</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">Controllable Profit</div>
-      <div class="kpi-value" id="kpiCtrl">R 0.00</div>
-      <div class="kpi-sub" id="kpiCtrlPct">0.0% after OpEx</div>
-    </div>
-    <div class="kpi-card good">
-      <div class="kpi-label">EBITDA (Operating Cash)</div>
-      <div class="kpi-value" id="kpiEbitda">R 0.00</div>
-      <div class="kpi-sub" id="kpiEbitdaPct">0.0% of Turnover</div>
-    </div>
-    <div class="kpi-card highlight">
-      <div class="kpi-label">Net Profit Before Tax</div>
-      <div class="kpi-value" id="kpiNpbt">R 0.00</div>
-      <div class="kpi-sub" id="kpiNpbtPct">0.0% (VAT Excluded)</div>
-    </div>
-  </section>
-
-  <!-- 5-Tab Navigation -->
+  <!-- Compact 6-Tab Navigation + Inline Quick Status -->
   <div class="tabs-bar">
     <div class="tab-buttons">
-      <button type="button" class="tab-btn active" data-tab="tabPnl">1. 2026_Income_Statement</button>
+      <button type="button" class="tab-btn active" data-tab="tabDashboard">0. Dashboard</button>
+      <button type="button" class="tab-btn" data-tab="tabPnl">1. 2026_Income_Statement</button>
       <button type="button" class="tab-btn" data-tab="tabAudit">2. Vendor_Mapping_Audit (<span id="auditCountTab">0</span>)</button>
       <button type="button" class="tab-btn" data-tab="tabCompare">3. Raw_vs_2026_Comparison</button>
       <button type="button" class="tab-btn" data-tab="tabMom">4. Month_over_Month_PnL</button>
       <button type="button" class="tab-btn" data-tab="tabCoa">5. GL_Codes_Reference (<span id="coaCountTab">0</span>)</button>
     </div>
-    <div style="font-size:11px;color:var(--text-secondary);padding-bottom:6px;">
-      Tip: Save each month via <strong>Save Snapshot</strong> to populate the Month-over-Month FY tracker.
+    <div class="tab-quick-pills">
+      <span id="navActiveLabel" class="nav-active-label">Oct 2026</span>
+      <span id="reconPill" class="pill pill-green">RECONCILED</span>
+      <span id="flagPill" class="pill pill-amber" style="cursor:pointer;" title="Click to inspect flagged items in Vendor Mapping Audit" onclick="jumpToFlaggedAudit()">0 FLAGS</span>
     </div>
   </div>
 
+  <!-- TAB 0: EXECUTIVE DASHBOARD, UPLOAD & REPORT CONTROLS -->
+  <section id="tabDashboard" class="tab-panel active">
+    <!-- Dropzone -->
+    <div class="dropzone" id="dropzone">
+      <div class="dropzone-info">
+        <strong>Drop Management_Report.csv or .xlsx anywhere here</strong> — <span>Automatically parses Income, COGS, OPEX, NonOPEX, Labour &amp; Debit Orders, applies saved 2026 GL rules &amp; recurring split templates, and slots into your Financial Year.</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
+        <button type="button" id="btnLoadSample">Load Sample Report</button>
+        <button type="button" id="btnDeleteSnapshot" class="btn-danger-outline">Delete Current Snapshot</button>
+      </div>
+    </div>
+
+    <!-- Active Report Controls & Tax Basis -->
+    <div class="status-strip">
+      <div class="status-left">
+        <span id="activeReportName" style="font-weight:700;color:var(--accent-gold);">Active Report: Management_Report.csv (Sample)</span>
+        <label class="period-label" title="Assign the accounting month (YYYY-MM) for Month-over-Month tracking">
+          <span>Reporting Month:</span>
+          <input type="month" id="reportPeriodInput" class="period-picker" />
+        </label>
+        <span id="dashReconPill" class="pill pill-green">RECONCILED &bull; R 0.00 DIFF</span>
+        <span id="dashFlagPill" class="pill pill-amber" style="cursor:pointer;" onclick="jumpToFlaggedAudit()">0 AUDIT FLAGS / REVIEW ITEMS</span>
+      </div>
+      <div class="status-right">
+        <span style="font-size:11px;color:var(--text-secondary);">Tax Display Mode:</span>
+        <select id="vatModeSelect" style="padding:4px 8px;font-size:11px;">
+          <option value="INCL">Cashbook / VAT-Inclusive (Matches CSV Cent-for-Cent)</option>
+          <option value="EXCL">Accrual Preview: Strip 15% VAT on Vatable Lines</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 6-Card KPI Strip -->
+    <section class="kpi-grid">
+      <div class="kpi-card highlight">
+        <div class="kpi-label">Net Turnover</div>
+        <div class="kpi-value" id="kpiTurnover">R 0.00</div>
+        <div class="kpi-sub" id="kpiTurnoverPct">100.0% of Sales</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Gross Profit (GP)</div>
+        <div class="kpi-value" id="kpiGP">R 0.00</div>
+        <div class="kpi-sub" id="kpiGPPct">0.0% Margin (COGS 0.0%)</div>
+      </div>
+      <div class="kpi-card warn">
+        <div class="kpi-label">Prime Cost (COGS + Labour)</div>
+        <div class="kpi-value" id="kpiPrime">R 0.00</div>
+        <div class="kpi-sub" id="kpiPrimePct">0.0% of Turnover</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Controllable Profit</div>
+        <div class="kpi-value" id="kpiCtrl">R 0.00</div>
+        <div class="kpi-sub" id="kpiCtrlPct">0.0% after OpEx</div>
+      </div>
+      <div class="kpi-card good">
+        <div class="kpi-label">EBITDA (Operating Cash)</div>
+        <div class="kpi-value" id="kpiEbitda">R 0.00</div>
+        <div class="kpi-sub" id="kpiEbitdaPct">0.0% of Turnover</div>
+      </div>
+      <div class="kpi-card highlight">
+        <div class="kpi-label">Net Profit Before Tax</div>
+        <div class="kpi-value" id="kpiNpbt">R 0.00</div>
+        <div class="kpi-sub" id="kpiNpbtPct">0.0% (VAT Excluded)</div>
+      </div>
+    </section>
+
+    <!-- Executive Dashboard Summary Cards -->
+    <div class="dash-summary-grid">
+      <div class="table-card" style="padding:14px 16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <strong style="color:var(--accent-gold);font-size:12.5px;text-transform:uppercase;letter-spacing:0.04em;">Store Operational Health &amp; Cash Bridge</strong>
+          <button type="button" class="btn-xs" onclick="switchToTab('tabPnl')">Open Income Statement &rarr;</button>
+        </div>
+        <div id="dashHealthSummary" class="dash-kv-list"></div>
+      </div>
+
+      <div class="table-card" style="padding:14px 16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <strong style="color:var(--accent-gold);font-size:12.5px;text-transform:uppercase;letter-spacing:0.04em;">Audit Exceptions &amp; Saved FY Archive</strong>
+          <button type="button" class="btn-xs-gold" onclick="jumpToFlaggedAudit()">Review Flagged Lines &rarr;</button>
+        </div>
+        <div id="dashAuditSummary" class="dash-kv-list"></div>
+      </div>
+    </div>
+  </section>
+
   <!-- TAB 1: 2026 INCOME STATEMENT -->
-  <section id="tabPnl" class="tab-panel active">
+  <section id="tabPnl" class="tab-panel">
     <div class="table-card">
       <div class="table-controls">
         <div>
@@ -242,7 +264,7 @@
           </label>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
-          <button type="button" id="btnExportMomXlsx" class="btn-emerald">Export MoM Comparison (.XLSX)</button>
+          <button type="button" id="btnExportMomXlsx" class="btn-emerald">Export MoM Excel (.XLSX)</button>
           <button type="button" id="btnExportMomPdf" class="btn-gold">Export MoM (.PDF)</button>
         </div>
       </div>
