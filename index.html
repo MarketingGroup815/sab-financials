@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sabino Canyon Spur — 2026 USAR P&L Mapper & Excel Generator</title>
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-badge">Sabino Canyon Spur</span>
+    <div class="brand-title">
+      <h1>2026 USAR Income Statement &amp; Audit Mapper</h1>
+      <p>Browser-Local Storage Engine &bull; Auto-Reconciles CSV / Excel Reports &bull; Month-over-Month FY Tracker &amp; .XLSX</p>
+    </div>
+  </div>
+  <div class="toolbar">
+    <select id="savedReportsSelect" title="Switch saved report snapshot in localStorage"></select>
+    <button type="button" id="btnSaveSnapshot" class="btn-emerald" title="Save current report & mappings to browser localStorage">Save Snapshot</button>
+    <button type="button" id="btnRulesModal" title="Manage learned vendor rules, split templates & JSON backup">Rules (<span id="ruleCountBadge">0</span>) &bull; Templates (<span id="tplCountBadge">0</span>)</button>
+    <label for="fileInput" class="file-upload-btn">
+      Upload Report (.CSV / .XLSX)
+      <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" style="display:none;" />
+    </label>
+    <button type="button" id="btnExportXlsx" class="btn-gold">Export 3-Tab Excel (.XLSX)</button>
+  </div>
+</header>
+
+<main class="container">
+  <!-- Dropzone -->
+  <div class="dropzone" id="dropzone">
+    <div class="dropzone-info">
+      <strong>Drop Management_Report.csv or .xlsx here</strong> — <span>Automatically parses Income, COGS, OPEX, NonOPEX, Labour &amp; Debit Orders, applies saved 2026 GL rules &amp; recurring split templates, and slots into your Financial Year.</span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button type="button" id="btnLoadSample">Load Sample Report</button>
+      <button type="button" id="btnDeleteSnapshot" class="btn-danger-outline">Delete Current Snapshot</button>
+    </div>
+  </div>
+
+  <!-- Reconciliation & Period Strip -->
+  <div class="status-strip">
+    <div class="status-left">
+      <span id="activeReportName" style="font-weight:700;color:var(--accent-gold);">Active Report: Management_Report.csv (Sample)</span>
+      <label class="period-label" title="Assign the accounting month (YYYY-MM) for Month-over-Month tracking">
+        <span>Reporting Month:</span>
+        <input type="month" id="reportPeriodInput" class="period-picker" />
+      </label>
+      <span id="reconPill" class="pill pill-green">RECONCILED &bull; R 0.00 DIFF</span>
+      <span id="flagPill" class="pill pill-amber">0 ITEMS NEED REVIEW</span>
+    </div>
+    <div class="status-right">
+      <span style="font-size:11px;color:var(--text-secondary);">Tax Display Mode:</span>
+      <select id="vatModeSelect" style="padding:4px 8px;font-size:11px;">
+        <option value="INCL">Cashbook / VAT-Inclusive (Matches CSV Cent-for-Cent)</option>
+        <option value="EXCL">Accrual Preview: Strip 15% VAT on Vatable Lines</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- 6-Card KPI Strip -->
+  <section class="kpi-grid">
+    <div class="kpi-card highlight">
+      <div class="kpi-label">Net Turnover</div>
+      <div class="kpi-value" id="kpiTurnover">R 0.00</div>
+      <div class="kpi-sub" id="kpiTurnoverPct">100.0% of Sales</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Gross Profit (GP)</div>
+      <div class="kpi-value" id="kpiGP">R 0.00</div>
+      <div class="kpi-sub" id="kpiGPPct">0.0% Margin (COGS 0.0%)</div>
+    </div>
+    <div class="kpi-card warn">
+      <div class="kpi-label">Prime Cost (COGS + Labour)</div>
+      <div class="kpi-value" id="kpiPrime">R 0.00</div>
+      <div class="kpi-sub" id="kpiPrimePct">0.0% of Turnover</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Controllable Profit</div>
+      <div class="kpi-value" id="kpiCtrl">R 0.00</div>
+      <div class="kpi-sub" id="kpiCtrlPct">0.0% after OpEx</div>
+    </div>
+    <div class="kpi-card good">
+      <div class="kpi-label">EBITDA (Operating Cash)</div>
+      <div class="kpi-value" id="kpiEbitda">R 0.00</div>
+      <div class="kpi-sub" id="kpiEbitdaPct">0.0% of Turnover</div>
+    </div>
+    <div class="kpi-card highlight">
+      <div class="kpi-label">Net Profit Before Tax</div>
+      <div class="kpi-value" id="kpiNpbt">R 0.00</div>
+      <div class="kpi-sub" id="kpiNpbtPct">0.0% (VAT Excluded)</div>
+    </div>
+  </section>
+
+  <!-- 5-Tab Navigation -->
+  <div class="tabs-bar">
+    <div class="tab-buttons">
+      <button type="button" class="tab-btn active" data-tab="tabPnl">1. 2026_Income_Statement</button>
+      <button type="button" class="tab-btn" data-tab="tabAudit">2. Vendor_Mapping_Audit (<span id="auditCountTab">0</span>)</button>
+      <button type="button" class="tab-btn" data-tab="tabCompare">3. Raw_vs_2026_Comparison</button>
+      <button type="button" class="tab-btn" data-tab="tabMom">4. Month_over_Month_PnL</button>
+      <button type="button" class="tab-btn" data-tab="tabCoa">5. GL_Codes_Reference (<span id="coaCountTab">0</span>)</button>
+    </div>
+    <div style="font-size:11px;color:var(--text-secondary);padding-bottom:6px;">
+      Tip: Save each month via <strong>Save Snapshot</strong> to populate the Month-over-Month FY tracker.
+    </div>
+  </div>
+
+  <!-- TAB 1: 2026 INCOME STATEMENT -->
+  <section id="tabPnl" class="tab-panel active">
+    <div class="table-card">
+      <div class="table-controls">
+        <div>
+          <strong>2026 Spur USAR Chart of Accounts (4000&ndash;8999)</strong>
+          <span style="color:var(--text-secondary);margin-left:8px;">Click any account row to inspect &amp; move individual transactions between GL codes</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <label style="font-size:11.5px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px;cursor:pointer;">
+            <input type="checkbox" id="chkHideZero" /> Hide R 0.00 Accounts
+          </label>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th class="center" style="width:95px;">GL Code</th>
+              <th>2026 Spur Account Name &amp; Mapped Transactions</th>
+              <th style="width:190px;">P&amp;L Classification</th>
+              <th class="num" style="width:155px;">Amount (ZAR)</th>
+              <th class="num" style="width:115px;">% Turnover</th>
+              <th class="center" style="width:95px;">Lines</th>
+            </tr>
+          </thead>
+          <tbody id="pnlTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 2: VENDOR MAPPING AUDIT -->
+  <section id="tabAudit" class="tab-panel">
+    <div class="table-card">
+      <div class="table-controls">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+          <input type="text" id="auditSearch" placeholder="Search vendor, GL code, or note..." style="width:230px;" />
+          <select id="auditSectionFilter">
+            <option value="ALL">All Source Sections</option>
+            <option value="Income">Income</option>
+            <option value="COGS">COGS</option>
+            <option value="OPEX">OPEX</option>
+            <option value="NonOPEX">NonOPEX</option>
+            <option value="Labour">Labour</option>
+            <option value="Debit Orders">Debit Orders</option>
+          </select>
+          <select id="auditStatusFilter">
+            <option value="ALL">All Statuses</option>
+            <option value="EDITED">Edited Amounts Only</option>
+            <option value="FLAGGED">Audit Flags &amp; Needs Review Only</option>
+            <option value="RECLASSIFIED">Reclassified Across Sections</option>
+            <option value="EXCLUDED">Excluded (Exclude / Balance Sheet)</option>
+          </select>
+          <button type="button" id="btnOpenAddLine" class="btn-emerald">+ Add Line</button>
+        </div>
+        <div id="auditSummaryStrip" style="font-family:var(--font-mono);font-size:11.5px;color:var(--accent-gold);"></div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th class="center" style="width:88px;">ID</th>
+              <th class="center" style="width:105px;">CSV Section</th>
+              <th class="center" style="width:62px;">Row</th>
+              <th>Vendor / Transaction Description</th>
+              <th class="num" style="width:155px;">Amount (ZAR) &bull; Edit</th>
+              <th style="width:270px;">Mapped 2026 GL Account (Editable)</th>
+              <th style="width:185px;">Status</th>
+              <th>Audit &amp; Compliance Note</th>
+              <th class="center" style="width:125px;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="auditTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 3: RAW VS 2026 COMPARISON -->
+  <section id="tabCompare" class="tab-panel">
+    <div class="table-card">
+      <div class="table-controls">
+        <strong>Structural Impact Bridge: Raw Cashbook Export vs. Reclassified 2026 Spur P&amp;L</strong>
+        <span style="color:var(--text-secondary);font-size:11.5px;">Shows why Net Profit Before Tax increases when Balance Sheet VAT &amp; Excluded items are separated</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>P&amp;L Category / Metric</th>
+              <th class="num">Raw Report (ZAR)</th>
+              <th class="num">Raw %</th>
+              <th class="num">Reclassified 2026 (ZAR)</th>
+              <th class="num">2026 %</th>
+              <th class="num">Variance (ZAR)</th>
+              <th>Primary Structural Driver</th>
+            </tr>
+          </thead>
+          <tbody id="compareTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="chart-box">
+      <div class="chart-header">
+        <strong>Visual Category Comparison (Raw Report vs. Reclassified 2026 P&amp;L)</strong>
+        <div class="legend">
+          <span class="l-raw">Raw CSV / Excel Export</span>
+          <span class="l-2026">Reclassified 2026 P&amp;L</span>
+        </div>
+      </div>
+      <div id="comparisonBars" class="bar-group-list"></div>
+    </div>
+  </section>
+
+  <!-- TAB 4: MONTH-OVER-MONTH P&L COMPARISON -->
+  <section id="tabMom" class="tab-panel">
+    <div class="table-card">
+      <div class="table-controls">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+          <strong style="color:var(--accent-gold);">Financial Year:</strong>
+          <select id="momFySelect"></select>
+          <select id="momDetailSelect">
+            <option value="ALL">Full P&amp;L (All Active GL Accounts + Totals)</option>
+            <option value="SUMMARY">Executive Summary Only (Sections &amp; KPIs)</option>
+          </select>
+          <label style="font-size:11.5px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px;cursor:pointer;">
+            <input type="checkbox" id="chkMomShowPct" checked /> Show % of Turnover
+          </label>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button type="button" id="btnExportMomXlsx" class="btn-emerald">Export MoM Comparison (.XLSX)</button>
+        </div>
+      </div>
+      <div class="mom-subbar">
+        <span id="momWindowBanner">FY 2026/2027 Closing Window (Oct 2026 – Feb 2027)</span>
+        <span>Use the selector inside any month header to link or switch saved monthly snapshots.</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead id="momTableHead"></thead>
+          <tbody id="momTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 5: GL CODES REFERENCE (READ-ONLY / UNEDITABLE) -->
+  <section id="tabCoa" class="tab-panel">
+    <div class="table-card">
+      <div class="table-controls">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+          <input type="text" id="coaSearch" placeholder="Search GL code, account name, or mapped vendor..." style="width:290px;" />
+          <select id="coaSectionFilter">
+            <option value="ALL">All Chart of Accounts Sections</option>
+            <option value="REV">1. Revenue (4000–4999)</option>
+            <option value="COGS">2. Cost of Sales / COGS (5000–5999)</option>
+            <option value="LAB">3. Labour &amp; People Costs (6000–6999)</option>
+            <option value="OPEX">4. Controllable Operating Expenses (7000–7999)</option>
+            <option value="OCC">5. Occupancy &amp; Fixed Overheads (8000–8499)</option>
+            <option value="BELOW">6. Below-the-Line Items (8500–8999)</option>
+            <option value="BS">7. Balance Sheet &amp; Excluded Control (Non-P&amp;L)</option>
+          </select>
+          <span class="pill pill-slate">READ-ONLY REFERENCE DIRECTORY</span>
+        </div>
+        <div id="coaSummaryStrip" style="font-family:var(--font-mono);font-size:11.5px;color:var(--accent-gold);"></div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th class="center" style="width:105px;">GL Code</th>
+              <th style="width:330px;">2026 Spur Account Name</th>
+              <th style="width:195px;">P&amp;L Classification</th>
+              <th class="center" style="width:165px;">15% VAT Basis</th>
+              <th>Standard / Rule-Mapped Vendors</th>
+              <th class="center" style="width:105px;">Active Lines</th>
+            </tr>
+          </thead>
+          <tbody id="coaTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- Split Line Modal (with Recurring Templates) -->
+<div class="modal-backdrop" id="splitModalBackdrop">
+  <div class="modal">
+    <div class="modal-head">
+      <strong style="color:var(--accent-gold);font-size:14px;">Split Audit Line &amp; Manage Recurring Split Templates</strong>
+      <button type="button" id="btnCloseSplitModal">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="template-box">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex:1;">
+            <strong style="font-size:11.5px;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.04em;">Saved Split Templates:</strong>
+            <select id="splitTemplateSelect" style="min-width:290px;flex:1;max-width:460px;"></select>
+            <button type="button" id="btnApplySplitTemplate" class="btn-emerald btn-xs">Apply Template</button>
+            <button type="button" id="btnDeleteSplitTemplate" class="btn-xs btn-danger-outline">Delete</button>
+          </div>
+          <span id="splitTemplateLoadedHint" style="font-size:11px;color:#34d399;font-family:var(--font-mono);"></span>
+        </div>
+      </div>
+
+      <div class="split-summary-bar" id="splitSummaryBar"></div>
+
+      <div class="table-card">
+        <div class="table-scroll" style="max-height:290px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Split Description / Sub-Vendor</th>
+                <th style="width:145px;" class="num">Amount (ZAR)</th>
+                <th style="width:265px;">2026 GL Account</th>
+                <th class="center" style="width:130px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="splitRowsTbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <button type="button" id="btnAddSplitSubRow" class="btn-emerald">+ Add Another Split Row</button>
+        <span style="font-size:11px;color:var(--text-secondary);">Common split: 8010 (Base Rent), 7230 (Water/Refuse), 7210 (Electricity)</span>
+      </div>
+
+      <div class="template-save-box">
+        <div style="font-size:11.5px;font-weight:700;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">
+          Save Current Split as Recurring Template (Browser localStorage)
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
+          <input type="text" id="saveSplitTplName" placeholder="Template Name (e.g. Mall Rent + Water + Electricity)" style="flex:1;min-width:230px;" />
+          <select id="saveSplitTplMode" style="min-width:235px;">
+            <option value="FIXED">Fixed ZAR Amounts (Exact Rand split)</option>
+            <option value="PCT">Proportional % Ratios (Scales to invoice total)</option>
+          </select>
+          <button type="button" id="btnSaveSplitTemplate" class="btn-gold">Save Split Template</button>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;font-size:11.5px;color:var(--text-secondary);">
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="chkBindTplVendor" checked />
+            <span>Bind to vendor <strong id="bindVendorLabel" style="color:var(--text-primary);"></strong></span>
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="chkAutoApplyTplUpload" checked />
+            <span>Auto-split this vendor automatically on future CSV / Excel uploads</span>
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span id="splitWarningText" style="font-size:11.5px;color:var(--status-amber);"></span>
+      <div style="display:flex;gap:8px;">
+        <button type="button" id="btnCancelSplit">Cancel</button>
+        <button type="button" id="btnConfirmSplit" class="btn-gold">Apply Split Lines</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add New Line Modal -->
+<div class="modal-backdrop" id="addLineModalBackdrop">
+  <div class="modal" style="max-width:620px;">
+    <div class="modal-head">
+      <strong style="color:var(--accent-gold);font-size:14px;">Add New Line to Vendor Mapping Audit</strong>
+      <button type="button" id="btnCloseAddModal">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="newLineSection">Source Section</label>
+          <select id="newLineSection">
+            <option value="Debit Orders">Debit Orders</option>
+            <option value="OPEX">OPEX</option>
+            <option value="COGS">COGS</option>
+            <option value="Labour">Labour</option>
+            <option value="NonOPEX">NonOPEX</option>
+            <option value="Income">Income</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="newLineAmount">Amount (ZAR)</label>
+          <input type="text" id="newLineAmount" inputmode="decimal" placeholder="0.00" value="0.00" />
+        </div>
+        <div class="form-group" style="grid-column:1 / -1;">
+          <label for="newLineVendor">Vendor / Transaction Description</label>
+          <input type="text" id="newLineVendor" placeholder="e.g., Mall Landlord — Water & Sewerage Recovery" />
+        </div>
+        <div class="form-group" style="grid-column:1 / -1;">
+          <label for="newLineCode">Mapped 2026 GL Account</label>
+          <select id="newLineCode"></select>
+        </div>
+        <div class="form-group" style="grid-column:1 / -1;">
+          <label for="newLineNote">Audit &amp; Compliance Note</label>
+          <input type="text" id="newLineNote" placeholder="Optional note (e.g., Split from monthly rental statement)" />
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span style="font-size:11px;color:var(--text-secondary);">Added lines update P&amp;L, Comparison &amp; Excel export immediately.</span>
+      <div style="display:flex;gap:8px;">
+        <button type="button" id="btnCancelAddLine">Cancel</button>
+        <button type="button" id="btnConfirmAddLine" class="btn-gold">Add Audit Line</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Rules, Split Templates & Backup Modal -->
+<div class="modal-backdrop" id="rulesModalBackdrop">
+  <div class="modal">
+    <div class="modal-head">
+      <strong style="color:var(--accent-gold);font-size:14px;">Browser LocalStorage Rules, Split Templates &amp; Backup Manager</strong>
+      <button type="button" id="btnCloseModal">Close</button>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--text-secondary);margin-bottom:12px;">
+        All vendor GL overrides, recurring split templates, and monthly snapshots are saved automatically in your browser's <code style="color:var(--accent-gold);">localStorage</code>. Export a JSON backup if moving to another computer.
+      </p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+        <button type="button" id="btnExportJson" class="btn-emerald">Download Full Backup (.JSON)</button>
+        <label for="jsonImportInput" class="file-upload-btn" style="font-weight:400;">
+          Restore Backup (.JSON)
+          <input type="file" id="jsonImportInput" accept=".json" style="display:none;" />
+        </label>
+        <button type="button" id="btnResetRules" class="btn-danger-outline">Reset Custom Rules to Default</button>
+      </div>
+
+      <div style="font-weight:700;color:var(--accent-gold);font-size:12px;text-transform:uppercase;letter-spacing:0.04em;margin:10px 0 6px;">
+        Saved Recurring Split Templates
+      </div>
+      <div class="table-card" style="margin-bottom:16px;">
+        <div class="table-scroll" style="max-height:220px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Template Name</th>
+                <th>Bound Vendor</th>
+                <th class="center">Mode &amp; Auto-Split</th>
+                <th>GL Split Breakdown</th>
+                <th class="center">Action</th>
+              </tr>
+            </thead>
+            <tbody id="splitTemplatesManagerTbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="font-weight:700;color:var(--accent-gold);font-size:12px;text-transform:uppercase;letter-spacing:0.04em;margin:10px 0 6px;">
+        Saved Single-Vendor GL Overrides
+      </div>
+      <div class="table-card">
+        <div class="table-scroll" style="max-height:240px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Normalized Vendor Key</th>
+                <th>Assigned 2026 GL Code</th>
+                <th>Account Name</th>
+                <th class="center">Action</th>
+              </tr>
+            </thead>
+            <tbody id="rulesTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="coa-rules.js"></script>
+<script src="storage-parser.js"></script>
+<script src="ui-tabs.js"></script>
+<script src="mom-view.js"></script>
+<script src="excel-app.js"></script>
+</body>
+</html>
