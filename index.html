@@ -14,7 +14,7 @@
     <span class="brand-badge">Sabino Canyon Spur</span>
     <div class="brand-title">
       <h1>2026 USAR Income Statement &amp; Audit Mapper</h1>
-      <p>Browser-Local Storage Engine &bull; Auto-Reconciles CSV / Excel Reports &bull; Month-over-Month FY Tracker &amp; .XLSX</p>
+      <p>Browser-Local Storage Engine &bull; Auto-Reconciles CSV / Excel Reports &bull; Month-over-Month FY Tracker, .XLSX &amp; .PDF</p>
     </div>
   </div>
   <div class="toolbar">
@@ -26,6 +26,7 @@
       <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" style="display:none;" />
     </label>
     <button type="button" id="btnExportXlsx" class="btn-gold">Export 3-Tab Excel (.XLSX)</button>
+    <button type="button" id="btnExportPdf" class="btn-emerald">Export P&amp;L (.PDF)</button>
   </div>
 </header>
 
@@ -242,6 +243,7 @@
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
           <button type="button" id="btnExportMomXlsx" class="btn-emerald">Export MoM Comparison (.XLSX)</button>
+          <button type="button" id="btnExportMomPdf" class="btn-gold">Export MoM (.PDF)</button>
         </div>
       </div>
       <div class="mom-subbar">
