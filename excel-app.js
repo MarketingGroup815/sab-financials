@@ -488,13 +488,19 @@ document.addEventListener("DOMContentLoaded", () => {
     e.target.value = "";
   });
 
+  // Global & Dropzone Drag-and-Drop Support across all tabs
   const dz = document.getElementById("dropzone");
-  dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("dragover"); });
-  dz.addEventListener("dragleave", () => dz.classList.remove("dragover"));
-  dz.addEventListener("drop", (e) => {
+  window.addEventListener("dragover", (e) => {
     e.preventDefault();
-    dz.classList.remove("dragover");
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    if (dz) dz.classList.add("dragover");
+  });
+  window.addEventListener("dragleave", (e) => {
+    if (e.relatedTarget === null && dz) dz.classList.remove("dragover");
+  });
+  window.addEventListener("drop", (e) => {
+    e.preventDefault();
+    if (dz) dz.classList.remove("dragover");
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleUploadedFile(e.dataTransfer.files[0]);
     }
   });
