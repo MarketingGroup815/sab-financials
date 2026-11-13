@@ -16,6 +16,14 @@ function exportThreeTabWorkbook() {
   const audStart = 5;
   const audEnd = audStart + auditCount - 1;
 
+  // Filter out R 0.00 GL accounts so the exported Income Statement is clean & concise
+  const activePnlRows = COA.filter(item => {
+    if (!item.code) return true;
+    const amt = fin.accTotals[item.code] || 0;
+    const cnt = fin.accCounts[item.code] || 0;
+    return Math.abs(amt) >= 0.005 || cnt > 0;
+  });
+
   // TAB 1: 2026_Income_Statement (4 Columns: Account Name, Classification, Amount, % Turnover)
   const wsPnlData = [
     ["SABINO CANYON SPUR — 2026 INCOME STATEMENT (USAR STANDARD)"],
@@ -28,7 +36,7 @@ function exportThreeTabWorkbook() {
   const secRowBounds = {};
   let rNum = 5;
 
-  COA.forEach(item => {
+  activePnlRows.forEach(item => {
     if (item.type === "HEADER") {
       wsPnlData.push([item.label, "", "", ""]);
       rowIndexMap[item.label] = rNum++;
@@ -48,7 +56,7 @@ function exportThreeTabWorkbook() {
   const wsPnl = XLSX.utils.aoa_to_sheet(wsPnlData);
   const netRevRow = rowIndexMap["NET_TURNOVER"];
 
-  COA.forEach(item => {
+  activePnlRows.forEach(item => {
     if (item.code) {
       const r = rowIndexMap[item.code];
       const valAmt = Number((fin.accTotals[item.code] || 0).toFixed(2));
@@ -73,7 +81,7 @@ function exportThreeTabWorkbook() {
         wsPnl[`D${r}`] = { t: "n", f: `IFERROR(C${r}/$C$${netRevRow},0)`, v: fin.netTurnover ? numVal / fin.netTurnover : 0, z: "0.0%" };
       };
 
-      if (item.sec && secRowBounds[item.sec]) {
+      if (item.sec) {
         const b = secRowBounds[item.sec];
         const secTotMap = {
           NET_TURNOVER: fin.netTurnover,
@@ -83,7 +91,12 @@ function exportThreeTabWorkbook() {
           TOTAL_OCCUPANCY: fin.totalOccupancy,
           TOTAL_BELOW: fin.totalBelow
         };
-        setSub(`SUM(C${b.first}:C${b.last})`, secTotMap[item.key] || 0);
+        if (b) {
+          setSub(`SUM(C${b.first}:C${b.last})`, secTotMap[item.key] || 0);
+        } else {
+          wsPnl[`C${r}`] = { t: "n", v: 0, z: '"R "#,##0.00' };
+          wsPnl[`D${r}`] = { t: "n", f: `IFERROR(C${r}/$C$${netRevRow},0)`, v: 0, z: "0.0%" };
+        }
       } else if (item.key === "GROSS_PROFIT") {
         setSub(`C${netRevRow}-C${rowIndexMap["TOTAL_COGS"]}`, fin.grossProfit);
       } else if (item.key === "PRIME_COST") {
@@ -96,9 +109,9 @@ function exportThreeTabWorkbook() {
         setSub(`C${rowIndexMap["EBITDA"]}-C${rowIndexMap["TOTAL_BELOW"]}`, fin.netProfitBeforeTax);
       } else if (item.key === "NET_CASH") {
         const rNp = rowIndexMap["NET_PROFIT"];
-        const rVat = rowIndexMap["BS-VAT"];
-        const rCap = rowIndexMap["BS-CAP"];
-        const netCashFormula = `C${rNp}-C${rVat}-C${rCap}-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"<>Income")+SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income")`;
+        const vatTerm = rowIndexMap["BS-VAT"] ? `-C${rowIndexMap["BS-VAT"]}` : "";
+        const capTerm = rowIndexMap["BS-CAP"] ? `-C${rowIndexMap["BS-CAP"]}` : "";
+        const netCashFormula = `C${rNp}${vatTerm}${capTerm}-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"<>Income")+SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income")`;
         setSub(netCashFormula, fin.netCashSurplus);
       }
     }
@@ -190,6 +203,10 @@ function exportThreeTabWorkbook() {
   const rawNet = rawEbitda - rawNonOp;
   const totalNonPnl = fin.bsVat + fin.bsCap - fin.excludedNetCashAdj;
 
+  const vatRef = rowIndexMap["BS-VAT"] ? `'2026_Income_Statement'!C${rowIndexMap["BS-VAT"]}+` : "";
+  const capRef = rowIndexMap["BS-CAP"] ? `'2026_Income_Statement'!C${rowIndexMap["BS-CAP"]}+` : "";
+  const nonPnlFormula = `${vatRef}${capRef}SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"<>Income")-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income")`;
+
   const cmpFormulas = [
     [5,  `SUMIF('Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income",'Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd})`, rawRev, `'2026_Income_Statement'!C${netRevRow}`, fin.netTurnover],
     [6,  `SUMIF('Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"COGS",'Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd})`, rawCogs, `'2026_Income_Statement'!C${rowIndexMap["TOTAL_COGS"]}`, fin.totalCogs],
@@ -201,7 +218,7 @@ function exportThreeTabWorkbook() {
     [12, "B7-B8-B10-B11", rawEbitda, "D7-D8-D10-D11", fin.ebitda],
     [13, `SUMIF('Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"NonOPEX",'Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd})`, rawNonOp, `'2026_Income_Statement'!C${rowIndexMap["TOTAL_BELOW"]}`, fin.totalBelow],
     [14, "B12-B13", rawNet, "D12-D13", fin.netProfitBeforeTax],
-    [15, "0", 0, `'2026_Income_Statement'!C${rowIndexMap["BS-VAT"]}+'2026_Income_Statement'!C${rowIndexMap["BS-CAP"]}+SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"<>Income")-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income")`, totalNonPnl],
+    [15, "0", 0, nonPnlFormula, totalNonPnl],
     [16, "B14-B15", rawNet, "D14-D15", fin.netCashSurplus]
   ];
 
@@ -219,16 +236,17 @@ function exportThreeTabWorkbook() {
   const safeTitle = activeReport.name.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/_+/g, "_");
   const outName = `Sabino_Canyon_Spur_2026_PnL_${safeTitle}.xlsx`;
   XLSX.writeFile(wb, outName);
-  showToast(`Exported 3-Tab Excel Workbook: ${outName}`);
+  showToast(`Exported 3-Tab Excel Workbook (Zero Lines Excluded): ${outName}`);
 }
 
 function exportOfflineCsv(fin) {
   let csvLines = ["2026 Spur Account Name,P&L Classification,Amount (ZAR),% Turnover"];
   COA.forEach(item => {
     if (item.code) {
-      const amt = (fin.accTotals[item.code] || 0).toFixed(2);
-      const pct = fin.netTurnover ? ((fin.accTotals[item.code] || 0) / fin.netTurnover * 100).toFixed(1) + "%" : "0.0%";
-      csvLines.push(`"${item.name}","${item.group}",${amt},"${pct}"`);
+      const amt = fin.accTotals[item.code] || 0;
+      if (Math.abs(amt) < 0.005) return;
+      const pct = fin.netTurnover ? (amt / fin.netTurnover * 100).toFixed(1) + "%" : "0.0%";
+      csvLines.push(`"${item.name}","${item.group}",${amt.toFixed(2)},"${pct}"`);
     }
   });
   downloadBlob(new Blob([csvLines.join("\n")], { type: "text/csv;charset=utf-8;" }), "Sabino_Canyon_Spur_2026_PnL_Offline.csv");
@@ -263,7 +281,7 @@ function exportStatementPdf(mode) {
       EBITDA: fin.ebitda, TOTAL_BELOW: fin.totalBelow, NET_PROFIT: fin.netProfitBeforeTax,
       NET_CASH: fin.netCashSurplus
     };
-    const hideZero = document.getElementById("chkHideZero").checked;
+    // Always exclude R 0.00 GL lines from exported PDF Income Statement
     let rowsHtml = "";
     COA.forEach(row => {
       if (row.type === "HEADER") {
@@ -271,7 +289,7 @@ function exportStatementPdf(mode) {
       } else if (row.code) {
         const amt = fin.accTotals[row.code] || 0;
         const cnt = fin.accCounts[row.code] || 0;
-        if (hideZero && Math.abs(amt) < 0.005 && cnt === 0) return;
+        if (Math.abs(amt) < 0.005 && cnt === 0) return;
         rowsHtml += `<tr>
           <td class="mono">${escapeHtml(row.code)}</td>
           <td>${escapeHtml(row.name)}</td>
