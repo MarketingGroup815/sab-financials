@@ -1,50 +1,86 @@
 // ============================================================================
-// 6. UI RENDERING (DASHBOARD, INCOME STATEMENT, AUDIT, COMPARISON & COA REF)
+// 6. UI RENDERING (DASHBOARD, KPI CARDS, P&L, VENDOR AUDIT, COMPARISON & COA)
 // ============================================================================
-function switchActiveTab(tabId) {
+window.switchToTab = function(tabId) {
   document.querySelectorAll(".tab-btn").forEach(b => {
     b.classList.toggle("active", b.dataset.tab === tabId);
   });
   document.querySelectorAll(".tab-panel").forEach(p => {
     p.classList.toggle("active", p.id === tabId);
   });
-}
+};
+
+window.jumpToFlaggedAudit = function() {
+  switchToTab("tabAudit");
+  const statusFilter = document.getElementById("auditStatusFilter");
+  if (statusFilter) {
+    statusFilter.value = "FLAGGED";
+    renderAuditTab(computeFinancials());
+  }
+};
 
 function renderAll() {
   const fin = computeFinancials();
   if (!fin) return;
 
+  const shortPeriod = (typeof formatYmShort === "function" && activeReport.period)
+    ? formatYmShort(activeReport.period)
+    : (activeReport.period || "Active");
+
+  const navLabel = document.getElementById("navActiveLabel");
+  if (navLabel) navLabel.textContent = shortPeriod;
+
   document.getElementById("activeReportName").textContent = `Active Report: ${activeReport.name}`;
-  const periodTag = document.getElementById("headerPeriodTag");
-  if (periodTag) {
-    periodTag.textContent = activeReport.period || "Period N/A";
-  }
   const periodInput = document.getElementById("reportPeriodInput");
   if (periodInput && activeReport.period) {
     periodInput.value = activeReport.period;
   }
 
+  // Inline Tab-Bar Pills + Dashboard Pills
   const reconEl = document.getElementById("reconPill");
+  const dashReconEl = document.getElementById("dashReconPill");
   if (Math.abs(fin.reconDiff) < 0.01 && fin.editedCount === 0) {
     reconEl.className = "pill pill-green";
-    reconEl.textContent = "RECONCILED • R 0.00";
+    reconEl.textContent = "RECONCILED";
+    if (dashReconEl) {
+      dashReconEl.className = "pill pill-green";
+      dashReconEl.textContent = "RECONCILED • R 0.00 DIFF";
+    }
   } else if (fin.editedCount > 0) {
     reconEl.className = "pill pill-gold";
-    reconEl.textContent = `${fin.editedCount} EDITED • DIFF ${fmtZar(fin.reconDiff)}`;
+    reconEl.textContent = `${fin.editedCount} EDITED`;
+    if (dashReconEl) {
+      dashReconEl.className = "pill pill-gold";
+      dashReconEl.textContent = `${fin.editedCount} EDITED • CSV DIFF ${fmtZar(fin.reconDiff)}`;
+    }
   } else {
     reconEl.className = "pill pill-red";
-    reconEl.textContent = `VARIANCE • ${fmtZar(fin.reconDiff)}`;
+    reconEl.textContent = `DIFF ${fmtZar(fin.reconDiff)}`;
+    if (dashReconEl) {
+      dashReconEl.className = "pill pill-red";
+      dashReconEl.textContent = `VARIANCE • ${fmtZar(fin.reconDiff)}`;
+    }
   }
 
-  const flagEl = document.getElementById("flagPillBtn");
+  const flagEl = document.getElementById("flagPill");
+  const dashFlagEl = document.getElementById("dashFlagPill");
   if (fin.flaggedCount === 0) {
-    flagEl.className = "pill pill-green pill-btn";
+    flagEl.className = "pill pill-green";
     flagEl.textContent = "0 FLAGS";
+    if (dashFlagEl) {
+      dashFlagEl.className = "pill pill-green";
+      dashFlagEl.textContent = "0 AUDIT FLAGS";
+    }
   } else {
-    flagEl.className = "pill pill-amber pill-btn";
-    flagEl.textContent = `${fin.flaggedCount} FLAGS`;
+    flagEl.className = "pill pill-amber";
+    flagEl.textContent = `${fin.flaggedCount} FLAG${fin.flaggedCount === 1 ? "" : "S"}`;
+    if (dashFlagEl) {
+      dashFlagEl.className = "pill pill-amber";
+      dashFlagEl.textContent = `${fin.flaggedCount} AUDIT FLAGS / REVIEW ITEMS`;
+    }
   }
 
+  // 6 KPI Cards on Dashboard
   document.getElementById("kpiTurnover").textContent = fmtZar(fin.netTurnover);
   document.getElementById("kpiTurnoverPct").textContent = fin.vatMode === "EXCL" ? "Excl. 15% VAT Basis" : "100.0% Cashbook Inflows";
 
@@ -65,7 +101,7 @@ function renderAll() {
 
   document.getElementById("auditCountTab").textContent = activeReport.items.length;
 
-  renderDashboardSummary(fin);
+  renderDashboardSummaries(fin);
   renderPnlTab(fin);
   renderAuditTab(fin);
   renderCompareTab(fin);
@@ -73,55 +109,70 @@ function renderAll() {
   renderCoaTab(fin);
 }
 
-function renderDashboardSummary(fin) {
+function renderDashboardSummaries(fin) {
   const healthEl = document.getElementById("dashHealthSummary");
-  if (healthEl) {
-    const excludedCount = activeReport.items.filter(x => x.code === "EXCLUDE" || (x.code && x.code.startsWith("BS-"))).length;
-    healthEl.innerHTML = `
-      <div class="dash-stat-row">
-        <span style="color:var(--text-secondary);">Total Parsed Report Lines</span>
-        <strong style="font-family:var(--font-mono);">${activeReport.items.length} lines</strong>
-      </div>
-      <div class="dash-stat-row">
-        <span style="color:var(--text-secondary);">Items Flagged / Needing Review</span>
-        <strong style="font-family:var(--font-mono);color:${fin.flaggedCount > 0 ? "#fbbf24" : "#34d399"};">${fin.flaggedCount} items</strong>
-      </div>
-      <div class="dash-stat-row">
-        <span style="color:var(--text-secondary);">Non-P&amp;L / Excluded / VAT Lines</span>
-        <strong style="font-family:var(--font-mono);">${excludedCount} lines (${fmtZar(fin.bsVat + fin.bsCap - fin.excludedNetCashAdj)})</strong>
-      </div>
-      <div class="dash-stat-row">
-        <span style="color:var(--text-secondary);">Reconciled Net Cash Surplus</span>
-        <strong style="font-family:var(--font-mono);color:var(--accent-gold);">${fmtZar(fin.netCashSurplus)}</strong>
-      </div>
-    `;
-  }
+  const auditEl = document.getElementById("dashAuditSummary");
+  if (!healthEl || !auditEl) return;
 
-  const snapEl = document.getElementById("dashSnapshotSummary");
-  if (snapEl) {
-    const snapCount = Object.keys(savedSnapshots).length;
-    const ruleCount = Object.keys(customRules).length;
-    const tplCount = Object.keys(splitTemplates).length;
-    const isSaved = Boolean(activeReport && activeReport.id && savedSnapshots[activeReport.id]);
-    snapEl.innerHTML = `
-      <div class="dash-stat-row">
-        <span style="color:var(--text-secondary);">Current Report Snapshot Status</span>
-        <strong style="color:${isSaved ? "#34d399" : "#fbbf24"};">${isSaved ? "Saved in Browser Storage" : "Unsaved Working Draft (Click Save)"}</strong>
-      </div>
-      <div class="dash-stat-row">
-        <span style="color:var(--text-secondary);">Stored Monthly Snapshots</span>
-        <strong style="font-family:var(--font-mono);">${snapCount} months saved</strong>
-      </div>
-      <div class="dash-stat-row">
-        <span style="color:var(--text-secondary);">Saved Vendor Overrides &amp; Split Templates</span>
-        <strong style="font-family:var(--font-mono);">${ruleCount} rules &bull; ${tplCount} templates</strong>
-      </div>
-      <div class="dash-stat-row">
-        <span style="color:var(--text-secondary);">HQ Financial Export Format</span>
-        <strong style="color:var(--accent-gold);">Clean Statement (GL Codes &amp; R 0.00 Excluded)</strong>
-      </div>
-    `;
-  }
+  const nonPnlTotal = fin.bsVat + fin.bsCap - fin.excludedNetCashAdj;
+  healthEl.innerHTML = `
+    <div class="dash-kv-row">
+      <span>Total Cost of Sales (5000–5999)</span>
+      <strong>${fmtZar(fin.totalCogs)} <span style="color:var(--text-secondary);font-weight:400;">(${fmtPct(fin.totalCogs, fin.netTurnover)})</span></strong>
+    </div>
+    <div class="dash-kv-row">
+      <span>Total Labour &amp; People Costs (6000–6999)</span>
+      <strong>${fmtZar(fin.totalLabour)} <span style="color:var(--text-secondary);font-weight:400;">(${fmtPct(fin.totalLabour, fin.netTurnover)})</span></strong>
+    </div>
+    <div class="dash-kv-row">
+      <span>Controllable OpEx (7000–7999)</span>
+      <strong>${fmtZar(fin.totalOpex)} <span style="color:var(--text-secondary);font-weight:400;">(${fmtPct(fin.totalOpex, fin.netTurnover)})</span></strong>
+    </div>
+    <div class="dash-kv-row">
+      <span>Occupancy &amp; Fixed Overheads (8000–8499)</span>
+      <strong>${fmtZar(fin.totalOccupancy)} <span style="color:var(--text-secondary);font-weight:400;">(${fmtPct(fin.totalOccupancy, fin.netTurnover)})</span></strong>
+    </div>
+    <div class="dash-kv-row">
+      <span>Balance Sheet VAT &amp; Excluded Items</span>
+      <strong style="color:#f87171;">${fmtZar(nonPnlTotal)}</strong>
+    </div>
+    <div class="dash-kv-row" style="border-color:var(--accent-gold);background:rgba(250,204,21,0.08);">
+      <span style="color:var(--accent-gold);font-weight:700;">Reconciled Net Cash Surplus</span>
+      <strong style="color:var(--accent-gold);">${fmtZar(fin.netCashSurplus)}</strong>
+    </div>
+  `;
+
+  const snapList = Object.values(savedSnapshots).sort((a, b) => (a.period || "").localeCompare(b.period || ""));
+  const snapBadges = snapList.length > 0
+    ? snapList.map(s => `<span class="v-chip">${escapeHtml(s.period || "N/A")}: <strong>${escapeHtml(s.name)}</strong></span>`).join(" ")
+    : `<span style="color:var(--text-secondary);font-size:11.5px;">No monthly snapshots saved yet — click <strong>Save</strong> in the top bar after reviewing.</span>`;
+
+  const flaggedItems = activeReport.items.filter(i => i._status && (i._status.includes("Audit Flag") || i._status.includes("Needs Review")));
+  const flagPreview = flaggedItems.length > 0
+    ? flaggedItems.slice(0, 3).map(i => `<div class="dash-kv-row" style="border-color:rgba(245,158,11,0.4);">
+        <span>${escapeHtml(i.vendor)} <span style="color:var(--text-secondary);">(${escapeHtml(i.code)})</span></span>
+        <strong style="color:var(--status-amber);">${fmtZar(i.amount)}</strong>
+      </div>`).join("")
+    : `<div class="dash-kv-row" style="border-color:rgba(16,185,129,0.4);">
+        <span style="color:#34d399;">All ${activeReport.items.length} report lines cleanly mapped</span>
+        <strong style="color:#34d399;">0 Flags</strong>
+      </div>`;
+
+  auditEl.innerHTML = `
+    <div class="dash-kv-row">
+      <span>Total Mapped Report Lines</span>
+      <strong>${activeReport.items.length} lines</strong>
+    </div>
+    <div class="dash-kv-row">
+      <span>Saved Browser Rules / Split Templates</span>
+      <strong>${Object.keys(customRules).length} rules &bull; ${Object.keys(splitTemplates).length} templates</strong>
+    </div>
+    ${flagPreview}
+    <div style="margin-top:4px;">
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px;text-transform:uppercase;font-weight:700;">Saved Monthly Snapshots (${snapList.length})</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;">${snapBadges}</div>
+    </div>
+  `;
 }
 
 function buildAccountOptionsHtml(selectedCode) {
@@ -336,7 +387,7 @@ window.onChangeItemAmount = function(itemId, rawValue, advanceNext) {
 
   const baseNote = stripEditSuffix(item.note);
   if (isItemAmountEdited(item)) {
-    item.note = `${baseNote} | [Amount edited from${fmtZar(item.originalAmount)} to ${fmtZar(item.amount)}]`;
+    item.note = `${baseNote} | [Amount edited from ${fmtZar(item.originalAmount)} to ${fmtZar(item.amount)}]`;
   } else {
     item.note = baseNote;
   }
@@ -345,7 +396,7 @@ window.onChangeItemAmount = function(itemId, rawValue, advanceNext) {
   renderAll();
 
   if (changed) {
-    showToast(`Updated "${item.vendor}" amount to \${fmtZar(item.amount)}`);
+    showToast(`Updated "${item.vendor}" amount to ${fmtZar(item.amount)}`);
   }
 
   if (advanceNext) {
@@ -390,7 +441,7 @@ window.onChangeItemCode = function(itemId, newCode) {
     ? "Manually excluded from P&L & saved to browser storage"
     : `Manually assigned to ${newCode} (${acc ? acc.name : newCode}) & saved to browser storage`;
   item.note = isItemAmountEdited(item)
-    ? `${baseNote} | [Amount edited from${fmtZar(item.originalAmount)} to ${fmtZar(item.amount)}]`
+    ? `${baseNote} | [Amount edited from ${fmtZar(item.originalAmount)} to ${fmtZar(item.amount)}]`
     : baseNote;
 
   if (!item.isVarianceRow && !item.isSplitChild && !item.isManualLine) {
@@ -406,7 +457,7 @@ window.deleteAuditLine = function(itemId) {
   const idx = activeReport.items.findIndex(x => x.id === itemId);
   if (idx < 0) return;
   const item = activeReport.items[idx];
-  if (!confirm(`Delete audit line "\${item.vendor}" (${fmtZar(item.amount)})?`)) return;
+  if (!confirm(`Delete audit line "${item.vendor}" (${fmtZar(item.amount)})?`)) return;
   activeReport.items.splice(idx, 1);
   autoSaveActiveState();
   renderAll();
@@ -468,7 +519,7 @@ window.openSplitModal = function(itemId) {
         code: parent.code === "EXCLUDE" ? "8010" : parent.code
       },
       {
-        vendor: `\${parent.vendor} — Water & Electricity`,
+        vendor: `${parent.vendor} — Water & Electricity`,
         amount: 0,
         code: suggestedSecondCode
       }
@@ -489,37 +540,37 @@ function renderSplitModal() {
 
   document.getElementById("splitSummaryBar").innerHTML = `
     <div><span style="color:var(--text-secondary);">Parent (${escapeHtml(parent.id)}):</span> <strong>${escapeHtml(parent.vendor)}</strong></div>
-    <div><span style="color:var(--text-secondary);">Original:</span> <strong>\${fmtZar(parent.amount)}</strong></div>
-    <div><span style="color:var(--text-secondary);">Allocated:</span> <strong style="color:var(--accent-gold);">\${fmtZar(allocated)}</strong></div>
+    <div><span style="color:var(--text-secondary);">Original:</span> <strong>${fmtZar(parent.amount)}</strong></div>
+    <div><span style="color:var(--text-secondary);">Allocated:</span> <strong style="color:var(--accent-gold);">${fmtZar(allocated)}</strong></div>
     <div><span style="color:var(--text-secondary);">Remaining:</span> <strong style="color:${isBalanced ? "#34d399" : "#fbbf24"};">${fmtZar(remaining)}</strong></div>
   `;
 
   const warnEl = document.getElementById("splitWarningText");
   warnEl.textContent = isBalanced
     ? "Balanced to original line amount (R 0.00 reconciliation variance)."
-    : `Note: Split total differs from original line by \${fmtZar(remaining)}.`;
+    : `Note: Split total differs from original line by ${fmtZar(remaining)}.`;
   warnEl.style.color = isBalanced ? "#34d399" : "#fbbf24";
 
   const tbody = document.getElementById("splitRowsTbody");
   tbody.innerHTML = splitDraftRows.map((row, idx) => `
     <tr>
       <td>
-        <input type="text" style="width:100%;" value="\${escapeHtml(row.vendor)}"
-          oninput="updateSplitDraftField(\${idx}, 'vendor', this.value)" />
+        <input type="text" style="width:100%;" value="${escapeHtml(row.vendor)}"
+          oninput="updateSplitDraftField(${idx}, 'vendor', this.value)" />
       </td>
       <td class="num">
-        <input type="text" inputmode="decimal" class="amt-input" style="width:125px;" value="\${Number(row.amount || 0).toFixed(2)}"
+        <input type="text" inputmode="decimal" class="amt-input" style="width:125px;" value="${Number(row.amount || 0).toFixed(2)}"
           onfocus="this.select()"
-          onchange="updateSplitDraftAmount(\${idx}, this.value)" />
+          onchange="updateSplitDraftAmount(${idx}, this.value)" />
       </td>
       <td>
-        <select class="gl-select" style="min-width:230px;" onchange="updateSplitDraftField(\${idx}, 'code', this.value)">
-          \${buildAccountOptionsHtml(row.code)}
+        <select class="gl-select" style="min-width:230px;" onchange="updateSplitDraftField(${idx}, 'code', this.value)">
+          ${buildAccountOptionsHtml(row.code)}
         </select>
       </td>
       <td class="center" style="white-space:nowrap;">
-        <button type="button" class="btn-xs" title="Assign remaining unallocated balance to this row" onclick="fillSplitRemainder(\${idx})">Fill Rem.</button>
-        \${splitDraftRows.length > 2 ? `<button type="button" class="btn-xs" style="color:#f87171;margin-left:3px;" onclick="removeSplitSubRow(${idx})">✕</button>` : ""}
+        <button type="button" class="btn-xs" title="Assign remaining unallocated balance to this row" onclick="fillSplitRemainder(${idx})">Fill Rem.</button>
+        ${splitDraftRows.length > 2 ? `<button type="button" class="btn-xs" style="color:#f87171;margin-left:3px;" onclick="removeSplitSubRow(${idx})">✕</button>` : ""}
       </td>
     </tr>
   `).join("");
@@ -607,7 +658,7 @@ function saveCurrentSplitAsTemplate() {
   renderSplitTemplatesDropdown(tplId);
   document.getElementById("splitTemplateLoadedHint").textContent = `Saved: ${tplName}`;
   renderAuditTab(computeFinancials());
-  showToast(`Saved split template "\${tplName}" to browser localStorage`);
+  showToast(`Saved split template "${tplName}" to browser localStorage`);
 }
 
 function applySplitModal() {
@@ -638,7 +689,7 @@ function applySplitModal() {
       amount: amt,
       originalAmount: isBalanced ? amt : (i === 0 ? Math.round((amt + remaining) * 100) / 100 : amt),
       code: r.code,
-      note: `Split from \${parent.id} (${parent.vendor}, Orig:${fmtZar(parent.amount)}) → ${r.code} (${acc ? acc.name : r.code})`,
+      note: `Split from ${parent.id} (${parent.vendor}, Orig: ${fmtZar(parent.amount)}) → ${r.code} (${acc ? acc.name : r.code})`,
       autoMatched: true,
       isVarianceRow: false,
       isSplitChild: true
@@ -650,7 +701,7 @@ function applySplitModal() {
   activeSplitParentId = null;
   autoSaveActiveState();
   renderAll();
-  showToast(`Split into \${newItems.length} audit lines`);
+  showToast(`Split into ${newItems.length} audit lines`);
 }
 
 function openAddLineModal() {
@@ -679,7 +730,7 @@ function confirmAddNewLine() {
   }
 
   const manualCount = activeReport.items.filter(x => String(x.id).startsWith("ADD-")).length + 1;
-  const newId = `ADD-\${String(manualCount).padStart(2, "0")}`;
+  const newId = `ADD-${String(manualCount).padStart(2, "0")}`;
   const acc = ACCOUNT_MAP[code];
 
   activeReport.items.push({
@@ -735,14 +786,14 @@ function renderCompareTab(fin) {
   tbody.innerHTML = rows.map(r => {
     const cls = r.type === "FINAL" ? "final-row" : (r.type === "KPI" ? "kpi-row" : (r.type === "SUB" ? "subtotal-row" : ""));
     const diff = r.nVal - r.rVal;
-    return `<tr class="\${cls}">
-      <td>\${r.label}</td>
-      <td class="num">\${fmtZar(r.rVal)}</td>
-      <td class="num">\${fmtPct(r.rVal, rawRev)}</td>
-      <td class="num">\${fmtZar(r.nVal)}</td>
-      <td class="num">\${fmtPct(r.nVal, fin.netTurnover)}</td>
-      <td class="num">\${fmtZar(diff)}</td>
-      <td style="font-size:11.5px;opacity:0.9;">\${r.driver}</td>
+    return `<tr class="${cls}">
+      <td>${r.label}</td>
+      <td class="num">${fmtZar(r.rVal)}</td>
+      <td class="num">${fmtPct(r.rVal, rawRev)}</td>
+      <td class="num">${fmtZar(r.nVal)}</td>
+      <td class="num">${fmtPct(r.nVal, fin.netTurnover)}</td>
+      <td class="num">${fmtZar(diff)}</td>
+      <td style="font-size:11.5px;opacity:0.9;">${r.driver}</td>
     </tr>`;
   }).join("");
 
@@ -760,14 +811,14 @@ function renderCompareTab(fin) {
     const wR = Math.min(100, Math.max(1, (Math.abs(c.r) / maxVal) * 100)).toFixed(1);
     const wN = Math.min(100, Math.max(1, (Math.abs(c.n) / maxVal) * 100)).toFixed(1);
     return `<div class="bar-row">
-      <div style="font-weight:600;font-size:12px;">\${c.label}</div>
+      <div style="font-weight:600;font-size:12px;">${c.label}</div>
       <div class="bar-tracks">
-        <div class="bar-track" title="Raw: \${fmtZar(c.r)}"><div class="bar-fill-raw" style="width:\${wR}%"></div></div>
-        <div class="bar-track" title="Reclassified: \${fmtZar(c.n)}"><div class="bar-fill-2026" style="width:\${wN}%"></div></div>
+        <div class="bar-track" title="Raw: ${fmtZar(c.r)}"><div class="bar-fill-raw" style="width:${wR}%"></div></div>
+        <div class="bar-track" title="2026: ${fmtZar(c.n)}"><div class="bar-fill-2026" style="width:${wN}%"></div></div>
       </div>
       <div style="font-family:var(--font-mono);font-size:11px;text-align:right;">
-        <div style="color:var(--text-secondary);">Raw: \${fmtZar(c.r)}</div>
-        <div style="color:var(--accent-gold);font-weight:700;">P&L: \${fmtZar(c.n)}</div>
+        <div style="color:var(--text-secondary);">Raw: ${fmtZar(c.r)}</div>
+        <div style="color:var(--accent-gold);font-weight:700;">2026: ${fmtZar(c.n)}</div>
       </div>
     </div>`;
   }).join("");
@@ -810,12 +861,12 @@ function renderCoaTab(fin) {
     const vatText = row.vatable ? "Vatable (15%)" : "Non-VAT / Statutory";
 
     if (q) {
-      const hay = `\${row.code} ${row.name}${row.group} ${vatText}${mappedVendors.join(" ")}`.toLowerCase();
+      const hay = `${row.code} ${row.name} ${row.group} ${vatText} ${mappedVendors.join(" ")}`.toLowerCase();
       if (!hay.includes(q)) return;
     }
 
     if (pendingHeader) {
-      html += `<tr class="sec-header"><td colspan="6">\${escapeHtml(pendingHeader.label)}</td></tr>`;
+      html += `<tr class="sec-header"><td colspan="6">${escapeHtml(pendingHeader.label)}</td></tr>`;
       pendingHeader = null;
     }
 
@@ -826,16 +877,16 @@ function renderCoaTab(fin) {
       : `<span class="pill pill-slate">Non-VAT / Statutory</span>`;
 
     const vendorsHtml = mappedVendors.length > 0
-      ? `<div class="vendor-chips">\${mappedVendors.map(v => `<span class="v-chip">${escapeHtml(v)}</span>`).join("")}</div>`
+      ? `<div class="vendor-chips">${mappedVendors.map(v => `<span class="v-chip">${escapeHtml(v)}</span>`).join("")}</div>`
       : `<span style="color:var(--text-muted);font-size:11.5px;">No fixed vendor rule (manual assignment)</span>`;
 
     html += `<tr>
-      <td class="center"><span class="code-badge">\${escapeHtml(row.code)}</span></td>
-      <td style="font-weight:600;">\${escapeHtml(row.name)}</td>
-      <td style="color:var(--text-secondary);font-size:12px;">\${escapeHtml(row.group)}</td>
-      <td class="center">\${vatPill}</td>
-      <td>\${vendorsHtml}</td>
-      <td class="center" style="font-family:var(--font-mono);color:\${activeLines > 0 ? "var(--accent-gold)" : "var(--text-muted)"};font-weight:${activeLines > 0 ? "700" : "400"};">${activeLines}</td>
+      <td class="center"><span class="code-badge">${escapeHtml(row.code)}</span></td>
+      <td style="font-weight:600;">${escapeHtml(row.name)}</td>
+      <td style="color:var(--text-secondary);font-size:12px;">${escapeHtml(row.group)}</td>
+      <td class="center">${vatPill}</td>
+      <td>${vendorsHtml}</td>
+      <td class="center" style="font-family:var(--font-mono);color:${activeLines > 0 ? "var(--accent-gold)" : "var(--text-muted)"};font-weight:${activeLines > 0 ? "700" : "400"};">${activeLines}</td>
     </tr>`;
   });
 
@@ -844,7 +895,7 @@ function renderCoaTab(fin) {
   }
 
   document.getElementById("coaSummaryStrip").textContent =
-    `Showing ${visibleCount} of${totalAccounts} GL Accounts (Internal Reference)`;
+    `Showing ${visibleCount} of ${totalAccounts} 2026 GL Accounts (Uneditable Reference)`;
   tbody.innerHTML = html;
 }
 
@@ -854,12 +905,12 @@ function renderCoaTab(fin) {
 function renderSnapshotDropdown() {
   const sel = document.getElementById("savedReportsSelect");
   const keys = Object.keys(savedSnapshots);
-  let opts = `<option value="">Snapshots (${keys.length})</option>`;
+  let opts = `<option value="">-- Saved Snapshots (${keys.length}) --</option>`;
   keys.sort((a, b) => (savedSnapshots[b].period || "").localeCompare(savedSnapshots[a].period || "")).forEach(k => {
     const snap = savedSnapshots[k];
     const selected = activeReport && activeReport.id === snap.id ? "selected" : "";
     const pTag = snap.period ? `[${snap.period}] ` : "";
-    opts += `<option value="\${snap.id}" ${selected}>${escapeHtml(pTag + snap.name)}</option>`;
+    opts += `<option value="${snap.id}" ${selected}>${escapeHtml(pTag + snap.name)} (${snap.items.length} lines)</option>`;
   });
   sel.innerHTML = opts;
 }
@@ -879,11 +930,51 @@ function renderRulesModalTable() {
       const modeLabel = tpl.mode === "PCT" ? "% Ratio" : "Fixed ZAR";
       const autoLabel = tpl.autoApplyOnUpload ? "Auto-Split ON" : "Manual Apply";
       const breakdownHtml = (tpl.rows || []).map(r => {
-        const valText = tpl.mode === "PCT" ? `\${Number(r.pct || 0).toFixed(1)}%` : fmtZar(r.amount);
-        return `<span class="v-chip">\${escapeHtml(r.suffix)} (${r.code}:${valText})</span>`;
+        const valText = tpl.mode === "PCT" ? `${Number(r.pct || 0).toFixed(1)}%` : fmtZar(r.amount);
+        return `<span class="v-chip">${escapeHtml(r.suffix)} (${r.code}: ${valText})</span>`;
       }).join("");
       return `<tr>
-        <td style="font-weight:600;">\${escapeHtml(tpl.name)}</td>
-        <td style="font-family:var(--font-mono);color:var(--text-secondary);">\${tpl.vendorKey ? escapeHtml(tpl.vendorKey) : "&mdash;"}</td>
-        <td class="center"><span class="pill \${tpl.autoApplyOnUpload ? "pill-green" : "pill-gold"}">${modeLabel} &bull; ${autoLabel}</span></td>
-        <td><div class="vendor-chips">\${breakdownHtml}</div></td>
+        <td style="font-weight:600;">${escapeHtml(tpl.name)}</td>
+        <td style="font-family:var(--font-mono);color:var(--text-secondary);">${tpl.vendorKey ? escapeHtml(tpl.vendorKey) : "&mdash;"}</td>
+        <td class="center"><span class="pill ${tpl.autoApplyOnUpload ? "pill-green" : "pill-gold"}">${modeLabel} &bull; ${autoLabel}</span></td>
+        <td><div class="vendor-chips">${breakdownHtml}</div></td>
+        <td class="center"><button type="button" onclick="deleteSplitTemplateById('${escapeAttr(tpl.id)}')" style="color:#f87171;padding:3px 8px;font-size:11px;">Remove</button></td>
+      </tr>`;
+    }).join("");
+  }
+
+  const tbody = document.getElementById("rulesTableBody");
+  const keys = Object.keys(customRules).sort();
+  if (keys.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" class="center" style="color:var(--text-secondary);padding:18px;">No custom single-vendor overrides saved yet. Change any vendor's GL code in Tab 1 or Tab 2 to store a permanent rule.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = keys.map(k => {
+    const r = customRules[k];
+    const acc = ACCOUNT_MAP[r.code];
+    return `<tr>
+      <td style="font-family:var(--font-mono);">${escapeHtml(k)}</td>
+      <td><span class="code-badge">${r.code}</span></td>
+      <td>${acc ? escapeHtml(acc.name) : "Unknown"}</td>
+      <td class="center"><button type="button" onclick="deleteCustomRule('${escapeAttr(k)}')" style="color:#f87171;padding:3px 8px;font-size:11px;">Remove</button></td>
+    </tr>`;
+  }).join("");
+}
+
+window.deleteSplitTemplateById = function(tplId) {
+  const tpl = splitTemplates[tplId];
+  if (!tpl) return;
+  delete splitTemplates[tplId];
+  persistSplitTemplates();
+  renderRulesModalTable();
+  renderAuditTab(computeFinancials());
+  showToast(`Removed split template "${tpl.name}"`);
+};
+
+window.deleteCustomRule = function(key) {
+  delete customRules[key];
+  persistRules();
+  renderRulesModalTable();
+  renderCoaTab(computeFinancials());
+  showToast(`Removed saved rule for "${key}"`);
+};
