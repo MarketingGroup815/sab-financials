@@ -1,120 +1,148 @@
 // ============================================================================
-// 8. MONTH-OVER-MONTH P&L COMPARISON ENGINE (OCT–FEB CLOSE & MAR–FEB 12M FY)
+// 8. MONTH-OVER-MONTH (FY MAR – FEB) ENGINE & SPUR PEGASUS EXCEL EXPORT
 // ============================================================================
-const MONTH_NAMES_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MOM_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-function formatYmShort(ym) {
-  const [y, m] = ym.split("-");
-  const idx = Math.max(0, Math.min(11, Number(m) - 1));
-  return `${MONTH_NAMES_SHORT[idx]} ${y}`;
+function formatShortYm(ym) {
+  if (!ym || !/^\d{4}-\d{2}$/.test(ym)) return ym || "";
+  const [yyyy, mm] = ym.split("-");
+  const mIdx = Number(mm) - 1;
+  return `${MOM_MONTH_NAMES[mIdx] || mm} ${yyyy.slice(2)}`;
 }
 
-function buildMarToFebMonths(startYear) {
-  const list = [];
-  for (let m = 3; m <= 12; m++) {
-    list.push(`${startYear}-${String(m).padStart(2, "0")}`);
+function getFyStartYearForYm(ym) {
+  if (!ym || !/^\d{4}-\d{2}$/.test(ym)) {
+    const now = new Date();
+    return now.getMonth() >= 2 ? now.getFullYear() : now.getFullYear() - 1;
   }
-  list.push(`${startYear + 1}-01`);
-  list.push(`${startYear + 1}-02`);
-  return list;
+  const [yyyy, mm] = ym.split("-").map(Number);
+  return mm >= 3 ? yyyy : yyyy - 1;
 }
 
-function getFinancialYearDefinitions() {
-  const defs = [
-    {
-      id: "FY26_CLOSE",
-      label: "FY 2026/2027 Closing Window (Oct 2026 – Feb 2027 • 5 Months)",
-      banner: "FY 2026/2027 Closing Window (Oct 2026 – Feb 2027) — Financial Year-End: 28 Feb 2027",
-      months: ["2026-10", "2026-11", "2026-12", "2027-01", "2027-02"]
-    },
-    {
-      id: "FY27_28",
-      label: "FY 2027/2028 Full Year (Mar 2027 – Feb 2028 • 12 Months)",
-      banner: "FY 2027/2028 New Financial Year (Mar 2027 – Feb 2028 • 12-Month Rolling Comparison)",
-      months: buildMarToFebMonths(2027)
-    },
-    {
-      id: "FY28_29",
-      label: "FY 2028/2029 Full Year (Mar 2028 – Feb 2029 • 12 Months)",
-      banner: "FY 2028/2029 Financial Year (Mar 2028 – Feb 2029 • 12-Month Rolling Comparison)",
-      months: buildMarToFebMonths(2028)
-    }
-  ];
-
-  // Auto-add any future March–Feb FY if snapshots exist beyond Feb 2029
-  const extraStartYears = new Set();
-  const checkPeriod = (p) => {
-    if (!p || !/^\d{4}-\d{2}$/.test(p)) return;
-    const [yStr, mStr] = p.split("-");
-    const y = Number(yStr);
-    const m = Number(mStr);
-    const fyStart = m >= 3 ? y : y - 1;
-    if (fyStart >= 2029) extraStartYears.add(fyStart);
+function buildFyDefinition(startYear) {
+  const months = [];
+  for (let i = 0; i < 12; i++) {
+    const m = ((2 + i) % 12) + 1;
+    const y = startYear + (2 + i >= 12 ? 1 : 0);
+    months.push(`${y}-${String(m).padStart(2, "0")}`);
+  }
+  return {
+    startYear,
+    value: String(startYear),
+    label: `FY ${startYear}/${startYear + 1} (Mar ${startYear} – Feb ${startYear + 1})`,
+    months
   };
-  if (activeReport) checkPeriod(activeReport.period);
-  Object.values(savedSnapshots).forEach(s => checkPeriod(s.period));
-
-  Array.from(extraStartYears).sort().forEach(yr => {
-    defs.push({
-      id: `FY_${yr}_${yr + 1}`,
-      label: `FY ${yr}/${yr + 1} Full Year (Mar ${yr} – Feb ${yr + 1} • 12 Months)`,
-      banner: `FY ${yr}/${yr + 1} Financial Year (Mar ${yr} – Feb ${yr + 1} • 12-Month Rolling Comparison)`,
-      months: buildMarToFebMonths(yr)
-    });
-  });
-
-  return defs;
 }
 
 function ensureMomFyOptions() {
   const sel = document.getElementById("momFySelect");
-  if (!sel) return null;
-  const defs = getFinancialYearDefinitions();
-  const prevChoice = sel.value;
+  const years = new Set();
+  if (activeReport && activeReport.period) years.add(getFyStartYearForYm(activeReport.period));
+  Object.values(savedSnapshots || {}).forEach(s => {
+    if (s && s.period) years.add(getFyStartYearForYm(s.period));
+  });
+  Object.keys(momSlotOverrides || {}).forEach(ym => {
+    years.add(getFyStartYearForYm(ym));
+  });
+  if (years.size === 0) years.add(getFyStartYearForYm(""));
 
-  sel.innerHTML = defs.map(d => `<option value="${d.id}">${escapeHtml(d.label)}</option>`).join("");
+  const sortedYears = Array.from(years).sort((a, b) => b - a);
+  const currentVal = sel ? sel.value : "";
 
-  if (prevChoice && defs.some(d => d.id === prevChoice)) {
-    sel.value = prevChoice;
-  } else if (activeReport && activeReport.period) {
-    const match = defs.find(d => d.months.includes(activeReport.period));
-    sel.value = match ? match.id : defs[0].id;
-  } else {
-    sel.value = defs[0].id;
+  if (sel) {
+    sel.innerHTML = sortedYears
+      .map(y => {
+        const def = buildFyDefinition(y);
+        return `<option value="${def.value}">${escapeHtml(def.label)}</option>`;
+      })
+      .join("");
+    if (currentVal && sortedYears.includes(Number(currentVal))) {
+      sel.value = currentVal;
+    } else if (activeReport && activeReport.period) {
+      sel.value = String(getFyStartYearForYm(activeReport.period));
+    }
   }
-  return defs.find(d => d.id === sel.value) || defs[0];
+
+  const chosenYear = sel && sel.value ? Number(sel.value) : sortedYears[0];
+  return buildFyDefinition(chosenYear);
 }
 
-function resolveReportForMonth(ym) {
-  const overrideId = momSlotOverrides[ym];
-  if (overrideId === "__NONE__") return null;
-  if (overrideId) {
-    if (activeReport && activeReport.id === overrideId) return activeReport;
-    if (savedSnapshots[overrideId]) return savedSnapshots[overrideId];
+function computeFinForSpecificReport(rep) {
+  if (!rep) return null;
+  if (typeof computeFinancialsForReport === "function") {
+    return computeFinancialsForReport(rep);
   }
-  if (activeReport && activeReport.period === ym) {
-    return activeReport;
+  const prevReport = activeReport;
+  try {
+    activeReport = rep;
+    return computeFinancials();
+  } finally {
+    activeReport = prevReport;
   }
-  const matches = Object.values(savedSnapshots)
-    .filter(s => s && s.period === ym)
-    .sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
-  return matches[0] || null;
 }
 
-window.onAssignMomSlot = function(ym, selectedId) {
-  if (!selectedId) {
-    momSlotOverrides[ym] = "__NONE__";
-  } else {
-    momSlotOverrides[ym] = selectedId;
-  }
-  persistMomOverrides();
-  renderMomTab();
-  showToast(`Updated ${formatYmShort(ym)} comparison slot`);
-};
+function buildMomColumns(fyDef) {
+  const monthFins = {};
+  const snapList = Object.values(savedSnapshots || {});
+
+  fyDef.months.forEach(ym => {
+    let chosenRep = null;
+    let sourceLabel = "";
+    const overrideId = (momSlotOverrides || {})[ym];
+
+    if (overrideId === "__NONE__") {
+      chosenRep = null;
+    } else if (overrideId === "__ACTIVE__" && activeReport) {
+      chosenRep = activeReport;
+      sourceLabel = activeReport.name;
+    } else if (overrideId && savedSnapshots[overrideId]) {
+      chosenRep = savedSnapshots[overrideId];
+      sourceLabel = chosenRep.name;
+    } else if (activeReport && activeReport.period === ym) {
+      chosenRep = activeReport;
+      sourceLabel = activeReport.name;
+    } else {
+      const match = snapList.find(s => s && s.period === ym);
+      if (match) {
+        chosenRep = match;
+        sourceLabel = match.name;
+      }
+    }
+
+    if (chosenRep) {
+      const sanitized = sanitizeReport(JSON.parse(JSON.stringify(chosenRep)));
+      const fin = computeFinForSpecificReport(sanitized);
+      if (fin) {
+        monthFins[ym] = { report: sanitized, fin, sourceLabel };
+      }
+    }
+  });
+
+  const cols = [];
+  fyDef.months.forEach((ym, idx) => {
+    cols.push({
+      type: "MONTH",
+      ym,
+      label: formatShortYm(ym),
+      entry: monthFins[ym] || null
+    });
+    if (idx > 0) {
+      const prevYm = fyDef.months[idx - 1];
+      cols.push({
+        type: "VAR",
+        label: `${formatShortYm(ym)} vs ${formatShortYm(prevYm)}`,
+        currEntry: monthFins[ym] || null,
+        prevEntry: monthFins[prevYm] || null
+      });
+    }
+  });
+
+  return { cols, monthFins };
+}
 
 function getMetricValueFromFin(fin, row) {
-  if (!fin) return 0;
-  if (row.code) return fin.accTotals[row.code] || 0;
+  if (!fin || !row) return 0;
+  if (row.code) return Number(fin.accTotals[row.code] || 0);
   const map = {
     NET_TURNOVER: fin.netTurnover,
     TOTAL_COGS: fin.totalCogs,
@@ -129,231 +157,350 @@ function getMetricValueFromFin(fin, row) {
     NET_PROFIT: fin.netProfitBeforeTax,
     NET_CASH: fin.netCashSurplus
   };
-  return map[row.key] || 0;
-}
-
-function isFavorableVariance(row, diff) {
-  if (Math.abs(diff) < 0.005) return null;
-  const positiveGoodKeys = new Set(["NET_TURNOVER", "GROSS_PROFIT", "CONTROLLABLE_PROFIT", "EBITDA", "NET_PROFIT", "NET_CASH"]);
-  if (row.code) {
-    if (row.code === "4900") return diff < 0; // Discounts: lower is better
-    if (row.sec === "REV") return diff > 0;
-    return diff < 0; // Expenses & COGS: lower is better
-  }
-  if (positiveGoodKeys.has(row.key)) return diff > 0;
-  return diff < 0;
-}
-
-function buildMomColumns(fyDef) {
-  const cols = [];
-  const monthFins = {};
-  fyDef.months.forEach(ym => {
-    const rep = resolveReportForMonth(ym);
-    monthFins[ym] = rep ? { rep, fin: computeFinancialsForReport(rep) } : null;
-  });
-
-  fyDef.months.forEach((ym, idx) => {
-    cols.push({ type: "MONTH", ym, label: formatYmShort(ym), entry: monthFins[ym] });
-    if (idx > 0) {
-      const prevYm = fyDef.months[idx - 1];
-      cols.push({
-        type: "VAR",
-        ym,
-        prevYm,
-        label: `${MONTH_NAMES_SHORT[Number(ym.split("-")[1]) - 1]} vs ${MONTH_NAMES_SHORT[Number(prevYm.split("-")[1]) - 1]}`,
-        currEntry: monthFins[ym],
-        prevEntry: monthFins[prevYm]
-      });
-    }
-  });
-
-  return { cols, monthFins };
+  return Number(map[row.key] || 0);
 }
 
 function renderMomTab() {
+  const fyDef = ensureMomFyOptions();
+  const { cols, monthFins } = buildMomColumns(fyDef);
+  const detailMode = (document.getElementById("momDetailSelect") || {}).value || "DETAILED";
+  const showPct = Boolean((document.getElementById("chkMomShowPct") || {}).checked);
+  const pilotToggled = Boolean(
+    (activeReport && activeReport.pilotMode) ||
+    fyDef.months.some(ym => monthFins[ym] && monthFins[ym].fin && monthFins[ym].fin.pilotActive)
+  );
+
+  // Render optional month-slot assignment cards if present in index.html
+  const slotContainer = document.getElementById("momSlotsGrid") || document.getElementById("momSlotAssignment");
+  if (slotContainer) {
+    const snapOptions = Object.values(savedSnapshots || {});
+    slotContainer.innerHTML = fyDef.months.map(ym => {
+      const entry = monthFins[ym];
+      const curOverride = (momSlotOverrides || {})[ym] || "";
+      let opts = `<option value="">Auto-Match (${entry ? escapeHtml(entry.sourceLabel) : "Empty"})</option>`;
+      if (activeReport) {
+        opts += `<option value="__ACTIVE__" ${curOverride === "__ACTIVE__" ? "selected" : ""}>Active: ${escapeHtml(activeReport.name)}</option>`;
+      }
+      snapOptions.forEach(s => {
+        opts += `<option value="${escapeHtml(s.id)}" ${curOverride === s.id ? "selected" : ""}>${escapeHtml(s.name)}</option>`;
+      });
+      opts += `<option value="__NONE__" ${curOverride === "__NONE__" ? "selected" : ""}>— Leave Empty —</option>`;
+
+      return `<div class="mom-slot-card ${entry ? "filled" : ""}">
+        <div class="mom-slot-hdr"><strong>${escapeHtml(formatShortYm(ym))}</strong><span>${entry ? "Loaded" : "Empty"}</span></div>
+        <select class="mom-slot-select" data-ym="${ym}">${opts}</select>
+      </div>`;
+    }).join("");
+
+    slotContainer.querySelectorAll(".mom-slot-select").forEach(sel => {
+      sel.addEventListener("change", (e) => {
+        const ym = e.target.dataset.ym;
+        const val = e.target.value;
+        if (!val) delete momSlotOverrides[ym];
+        else momSlotOverrides[ym] = val;
+        if (typeof persistMomOverrides === "function") persistMomOverrides();
+        renderMomTab();
+      });
+    });
+  }
+
   const thead = document.getElementById("momTableHead");
   const tbody = document.getElementById("momTableBody");
   if (!thead || !tbody) return;
 
-  const fyDef = ensureMomFyOptions();
-  if (!fyDef) return;
-
-  document.getElementById("momWindowBanner").textContent = fyDef.banner;
-  const detailMode = document.getElementById("momDetailSelect").value;
-  const showPct = document.getElementById("chkMomShowPct").checked;
-  const { cols, monthFins } = buildMomColumns(fyDef);
-
-  const allSnapList = Object.values(savedSnapshots).sort((a, b) => (a.period || "").localeCompare(b.period || ""));
-
-  // Build Header Row
-  let headHtml = `<tr><th class="mom-sticky-col">GL / 2026 Spur Account Name</th>`;
-  cols.forEach(col => {
-    if (col.type === "MONTH") {
-      const currentRep = col.entry ? col.entry.rep : null;
-      const activeMatchesSlot = activeReport && activeReport.period === col.ym && (!currentRep || currentRep.id === activeReport.id);
-
-      let opts = `<option value="">-- Empty --</option>`;
-      if (activeReport && !savedSnapshots[activeReport.id]) {
-        const selAttr = currentRep && currentRep.id === activeReport.id ? "selected" : "";
-        opts += `<option value="${escapeAttr(activeReport.id)}" ${selAttr}>Active: ${escapeHtml(activeReport.name)}</option>`;
-      }
-      allSnapList.forEach(s => {
-        const selAttr = currentRep && currentRep.id === s.id ? "selected" : "";
-        opts += `<option value="${escapeAttr(s.id)}" ${selAttr}>${escapeHtml(s.name)}</option>`;
-      });
-
-      const statusTag = currentRep
-        ? (activeMatchesSlot && !savedSnapshots[activeReport.id] ? " (Unsaved Active)" : "")
-        : "";
-
-      headHtml += `<th class="num" style="min-width:155px;">
-        <div>${escapeHtml(col.label)}${statusTag}</div>
-        <select class="mom-hdr-select" title="Assign saved snapshot to ${escapeAttr(col.label)}" onchange="onAssignMomSlot('${col.ym}', this.value)">
-          ${opts}
-        </select>
-      </th>`;
-    } else {
-      headHtml += `<th class="num" style="min-width:130px;background:#0f172a;color:#94a3b8;">
-        <div>${escapeHtml(col.label)}</div>
-        <div style="font-size:9.5px;font-weight:500;color:var(--text-muted);margin-top:4px;">MoM Change (ZAR / %)</div>
-      </th>`;
-    }
+  let thHtml = `<tr><th style="min-width:250px;">2026 Spur Account / Category</th>`;
+  cols.forEach(c => {
+    thHtml += `<th class="num">${escapeHtml(c.label)}</th>`;
   });
-  headHtml += `<th class="num" style="min-width:165px;border-left:2px solid var(--accent-gold);">FY YTD Total</th></tr>`;
-  thead.innerHTML = headHtml;
+  thHtml += `<th class="num">FY YTD</th></tr>`;
+  thead.innerHTML = thHtml;
 
-  // Build Body Rows
-  let bodyHtml = "";
-  const totalColsCount = cols.length + 2;
-
+  let tbHtml = "";
   COA.forEach(row => {
+    if (typeof isNonPnlSectionRow === "function" && isNonPnlSectionRow(row)) return;
     if (row.type === "HEADER") {
-      bodyHtml += `<tr class="sec-header"><td class="mom-sticky-col">${escapeHtml(row.label)}</td><td colspan="${totalColsCount - 1}"></td></tr>`;
+      tbHtml += `<tr class="sec-row"><td colspan="${cols.length + 2}">${escapeHtml(row.label)}</td></tr>`;
       return;
     }
-
     if (row.code && detailMode === "SUMMARY") return;
-
-    // In FULL mode, hide GL accounts that are R 0.00 across every populated month in this FY
     if (row.code) {
+      if (pilotToggled && (row.sec === "REV" || row.sec === "COGS") && row.code !== "4010" && row.code !== "5010") {
+        return;
+      }
+      const isPilotCore = pilotToggled && (row.code === "4010" || row.code === "5010");
       const anyNonZero = fyDef.months.some(ym => {
         const e = monthFins[ym];
         return e && Math.abs(e.fin.accTotals[row.code] || 0) >= 0.005;
       });
-      if (!anyNonZero) return;
+      if (!isPilotCore && !anyNonZero) return;
     }
 
-    const rowCls = row.type === "FINAL" || row.type === "CASH"
-      ? "final-row"
-      : (row.type === "KPI" ? "kpi-row" : (row.type === "SUBTOTAL" ? "subtotal-row" : ""));
-
+    const rowCls = row.type === "FINAL" ? "final-row" : (row.type === "KPI" ? "kpi-row" : (row.type === "SUBTOTAL" ? "sub-row" : ""));
     const labelHtml = row.code
-      ? `<span class="code-badge" style="margin-right:6px;">${row.code}</span><span style="font-weight:600;">${escapeHtml(row.name)}</span>`
+      ? `<span class="gl-pill">${escapeHtml(row.code)}</span> ${escapeHtml(row.name)}`
       : escapeHtml(row.label);
 
-    let rowHtml = `<tr class="${rowCls}"><td class="mom-sticky-col">${labelHtml}</td>`;
-
-    let ytdSum = 0;
-    let ytdTurnover = 0;
+    let rHtml = `<tr class="${rowCls}"><td>${labelHtml}</td>`;
+    let ytd = 0;
+    let ytdRev = 0;
 
     cols.forEach(col => {
       if (col.type === "MONTH") {
         if (!col.entry) {
-          rowHtml += `<td class="num" style="color:var(--text-muted);">&mdash;</td>`;
+          rHtml += `<td class="num muted">&mdash;</td>`;
         } else {
           const val = getMetricValueFromFin(col.entry.fin, row);
-          const turn = col.entry.fin.netTurnover || 0;
-          ytdSum += val;
-          ytdTurnover += turn;
-          const pctSub = showPct ? `<span class="mom-cell-sub">${fmtPct(val, turn)}</span>` : "";
-          rowHtml += `<td class="num">${fmtZar(val)}${pctSub}</td>`;
+          ytd += val;
+          ytdRev += col.entry.fin.netTurnover || 0;
+          const pctSub = showPct && col.entry.fin.netTurnover
+            ? `<div class="sub-pct">${fmtPct(val, col.entry.fin.netTurnover)}</div>`
+            : "";
+          rHtml += `<td class="num">${fmtZar(val)}${pctSub}</td>`;
         }
       } else {
         if (!col.currEntry || !col.prevEntry) {
-          rowHtml += `<td class="num" style="color:var(--text-muted);background:rgba(15,23,42,0.45);">&mdash;</td>`;
+          rHtml += `<td class="num muted">&mdash;</td>`;
         } else {
-          const currVal = getMetricValueFromFin(col.currEntry.fin, row);
-          const prevVal = getMetricValueFromFin(col.prevEntry.fin, row);
-          const diff = currVal - prevVal;
-          const fav = isFavorableVariance(row, diff);
-          const vCls = fav === null ? "" : (fav ? "var-good" : "var-bad");
+          const diff = getMetricValueFromFin(col.currEntry.fin, row) - getMetricValueFromFin(col.prevEntry.fin, row);
           const sign = diff > 0.004 ? "+" : "";
-          const pctDiff = Math.abs(prevVal) >= 0.01 ? `${sign}${((diff / Math.abs(prevVal)) * 100).toFixed(1)}%` : "n/a";
-          rowHtml += `<td class="num ${vCls}" style="background:rgba(15,23,42,0.45);">
-            ${sign}${fmtZar(diff)}
-            <span class="mom-cell-sub">${pctDiff}</span>
-          </td>`;
+          rHtml += `<td class="num">${sign}${fmtZar(diff)}</td>`;
         }
       }
     });
 
-    const ytdPctSub = showPct ? `<span class="mom-cell-sub">${fmtPct(ytdSum, ytdTurnover)}</span>` : "";
-    rowHtml += `<td class="num" style="border-left:2px solid var(--accent-gold);font-weight:700;">${fmtZar(ytdSum)}${ytdPctSub}</td></tr>`;
-    bodyHtml += rowHtml;
+    const ytdPctSub = showPct && ytdRev ? `<div class="sub-pct">${fmtPct(ytd, ytdRev)}</div>` : "";
+    rHtml += `<td class="num"><strong>${fmtZar(ytd)}</strong>${ytdPctSub}</td></tr>`;
+    tbHtml += rHtml;
   });
 
-  tbody.innerHTML = bodyHtml;
+  tbody.innerHTML = tbHtml;
+}
+
+// ============================================================================
+// MONTH-OVER-MONTH EXCEL (.XLSX) EXPORT — SPUR PEGASUS STYLED
+// (No Header Subline, No GL Code Column, No MoM Variance Columns, Pilot-Clean)
+// ============================================================================
+function excelColLetter(zeroBasedIdx) {
+  let s = "";
+  let n = zeroBasedIdx;
+  while (n >= 0) {
+    s = String.fromCharCode((n % 26) + 65) + s;
+    n = Math.floor(n / 26) - 1;
+  }
+  return s;
 }
 
 function exportMomWorkbook() {
-  const fyDef = ensureMomFyOptions();
-  if (!fyDef) return;
   if (typeof XLSX === "undefined") {
-    alert("Excel export requires internet connection to load SheetJS.");
+    alert("Excel export requires internet connection to load the spreadsheet library.");
     return;
   }
 
+  const fyDef = ensureMomFyOptions();
   const { cols, monthFins } = buildMomColumns(fyDef);
-  const wb = XLSX.utils.book_new();
+  const monthCols = cols.filter(c => c.type === "MONTH");
+  const detailMode = (document.getElementById("momDetailSelect") || {}).value || "DETAILED";
+  const pilotToggled = Boolean(
+    (activeReport && activeReport.pilotMode) ||
+    fyDef.months.some(ym => monthFins[ym] && monthFins[ym].fin && monthFins[ym].fin.pilotActive)
+  );
 
-  const headerRow = ["GL Code", "2026 Spur Account Name", "P&L Classification"];
-  cols.forEach(c => headerRow.push(c.type === "MONTH" ? c.label : `${c.label} (Var)`));
-  headerRow.push("FY YTD Total (ZAR)");
+  // Fallback styles in case PEGASUS_XLSX_STYLES is unavailable
+  const S = (typeof PEGASUS_XLSX_STYLES !== "undefined") ? PEGASUS_XLSX_STYLES : {
+    title: { fill: { patternType: "solid", fgColor: { rgb: "1B365D" } }, font: { bold: true, color: { rgb: "FFFFFF" }, sz: 13 } },
+    thLeft: { fill: { patternType: "solid", fgColor: { rgb: "C8102E" } }, font: { bold: true, color: { rgb: "FFFFFF" } } },
+    thRight: { fill: { patternType: "solid", fgColor: { rgb: "C8102E" } }, font: { bold: true, color: { rgb: "FFFFFF" } }, alignment: { horizontal: "right" } },
+    secHeader: { fill: { patternType: "solid", fgColor: { rgb: "1B365D" } }, font: { bold: true, color: { rgb: "FFFFFF" } } },
+    rowEvenLeft: { fill: { patternType: "solid", fgColor: { rgb: "FFFFFF" } } },
+    rowEvenRight: { fill: { patternType: "solid", fgColor: { rgb: "FFFFFF" } }, alignment: { horizontal: "right" } },
+    rowOddLeft: { fill: { patternType: "solid", fgColor: { rgb: "F8FAFC" } } },
+    rowOddRight: { fill: { patternType: "solid", fgColor: { rgb: "F8FAFC" } }, alignment: { horizontal: "right" } },
+    subtotalLeft: { fill: { patternType: "solid", fgColor: { rgb: "E6ECF5" } }, font: { bold: true, color: { rgb: "1B365D" } } },
+    subtotalRight: { fill: { patternType: "solid", fgColor: { rgb: "E6ECF5" } }, font: { bold: true, color: { rgb: "1B365D" } }, alignment: { horizontal: "right" } },
+    kpiLeft: { fill: { patternType: "solid", fgColor: { rgb: "FEF3C7" } }, font: { bold: true, color: { rgb: "78350F" } } },
+    kpiRight: { fill: { patternType: "solid", fgColor: { rgb: "FEF3C7" } }, font: { bold: true, color: { rgb: "78350F" } }, alignment: { horizontal: "right" } },
+    finalLeft: { fill: { patternType: "solid", fgColor: { rgb: "C8102E" } }, font: { bold: true, color: { rgb: "FFFFFF" } } },
+    finalRight: { fill: { patternType: "solid", fgColor: { rgb: "C8102E" } }, font: { bold: true, color: { rgb: "FFFFFF" } }, alignment: { horizontal: "right" } }
+  };
 
-  const aoa = [
-    [`SABINO CANYON SPUR — MONTH-OVER-MONTH P&L COMPARISON (${fyDef.label})`],
-    ["Generated from Sabino Canyon Spur 2026 USAR Mapper"],
-    [],
-    headerRow
-  ];
+  const totalColsCount = 1 + monthCols.length + 1; // Account/Category + 12 Months + FY YTD
+  const allColLetters = [];
+  for (let c = 0; c < totalColsCount; c++) allColLetters.push(excelColLetter(c));
+
+  const firstMonthCol = excelColLetter(1); // B
+  const lastMonthCol = excelColLetter(monthCols.length); // M
+  const ytdCol = excelColLetter(totalColsCount - 1); // N
+
+  // Row 1: Spur Pegasus Title Banner (Header Subline removed per user request)
+  const titleRow = [`Sabino Canyon Spur - Month-over-Month Income Statement (${fyDef.label})`];
+  while (titleRow.length < totalColsCount) titleRow.push("");
+
+  // Row 2: Clean Spacer Row
+  const spacerRow = new Array(totalColsCount).fill("");
+
+  // Row 3: Table Column Headers (No GL code column, no MoM variance columns)
+  const headerRow = ["Account / Category", ...monthCols.map(c => c.label), "FY YTD"];
+
+  const aoa = [titleRow, spacerRow, headerRow];
+  const exportRowsMeta = [];
+  const rowIndexMap = {};
+  const secRowBounds = {};
+  let rNum = 4;
 
   COA.forEach(row => {
+    if (typeof isNonPnlSectionRow === "function" && isNonPnlSectionRow(row)) return;
     if (row.type === "HEADER") {
-      aoa.push(["", row.label, ""]);
+      const cleanCat = typeof stripCategoryCodeRange === "function"
+        ? stripCategoryCodeRange(row.label)
+        : String(row.label || "").replace(/\s*\(\d{4}\s*[–-]\s*\d{4}\)\s*$/g, "").trim();
+      const rArr = [cleanCat];
+      while (rArr.length < totalColsCount) rArr.push("");
+      aoa.push(rArr);
+      rowIndexMap[row.label] = rNum;
+      exportRowsMeta.push({ row, rNum, kind: "HEADER" });
+      rNum++;
       return;
     }
-    const line = [row.code || "", row.code ? row.name : row.label, row.group || "Summary"];
-    let ytd = 0;
 
-    cols.forEach(col => {
-      if (col.type === "MONTH") {
-        if (!col.entry) {
-          line.push(0);
-        } else {
-          const val = Number(getMetricValueFromFin(col.entry.fin, row).toFixed(2));
-          ytd += val;
-          line.push(val);
-        }
-      } else {
-        if (!col.currEntry || !col.prevEntry) {
-          line.push(0);
-        } else {
-          const diff = getMetricValueFromFin(col.currEntry.fin, row) - getMetricValueFromFin(col.prevEntry.fin, row);
-          line.push(Number(diff.toFixed(2)));
-        }
+    if (row.code && detailMode === "SUMMARY") return;
+    if (row.code) {
+      if (pilotToggled && (row.sec === "REV" || row.sec === "COGS") && row.code !== "4010" && row.code !== "5010") {
+        return;
       }
-    });
+      const isPilotCore = pilotToggled && (row.code === "4010" || row.code === "5010");
+      const anyNonZero = fyDef.months.some(ym => {
+        const e = monthFins[ym];
+        return e && Math.abs(e.fin.accTotals[row.code] || 0) >= 0.005;
+      });
+      if (!isPilotCore && !anyNonZero) return;
 
-    line.push(Number(ytd.toFixed(2)));
-    aoa.push(line);
+      rowIndexMap[row.code] = rNum;
+      if (!secRowBounds[row.sec]) secRowBounds[row.sec] = { first: rNum, last: rNum };
+      secRowBounds[row.sec].last = rNum;
+
+      const rArr = [row.name];
+      while (rArr.length < totalColsCount) rArr.push(0);
+      aoa.push(rArr);
+      exportRowsMeta.push({ row, rNum, kind: "DETAIL" });
+      rNum++;
+    } else if (row.key) {
+      rowIndexMap[row.key] = rNum;
+      const rArr = [row.label];
+      while (rArr.length < totalColsCount) rArr.push(0);
+      aoa.push(rArr);
+      const kind = row.type === "FINAL" ? "FINAL" : (row.type === "KPI" ? "KPI" : "SUB");
+      exportRowsMeta.push({ row, rNum, kind });
+      rNum++;
+    }
   });
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{ wch: 11 }, { wch: 46 }, { wch: 22 }, ...cols.map(() => ({ wch: 18 })), { wch: 20 }];
-  XLSX.utils.book_append_sheet(wb, ws, "Month_over_Month_PnL");
+  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: totalColsCount - 1 } }];
 
-  const safeFy = fyDef.id.replace(/[^a-zA-Z0-9_-]/g, "_");
-  const outName = `Sabino_Canyon_Spur_MoM_PnL_${safeFy}.xlsx`;
+  // Style Title Banner & Column Headers
+  allColLetters.forEach((colL, cIdx) => {
+    const tAddr = `${colL}1`;
+    if (!ws[tAddr]) ws[tAddr] = { t: "s", v: "" };
+    ws[tAddr].s = S.title;
+
+    const hAddr = `${colL}3`;
+    if (!ws[hAddr]) ws[hAddr] = { t: "s", v: "" };
+    ws[hAddr].s = cIdx === 0 ? S.thLeft : S.thRight;
+  });
+
+  const rowHeights = [{ hpt: 28 }, { hpt: 10 }, { hpt: 24 }];
+  let detailStripe = 0;
+
+  exportRowsMeta.forEach(({ row, rNum: r, kind }) => {
+    if (kind === "HEADER") {
+      allColLetters.forEach(colL => {
+        const addr = `${colL}${r}`;
+        if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+        ws[addr].s = S.secHeader;
+      });
+      rowHeights.push({ hpt: 22 });
+      detailStripe = 0;
+      return;
+    }
+
+    if (kind === "DETAIL") {
+      const isEven = detailStripe++ % 2 === 0;
+      const stL = isEven ? S.rowEvenLeft : S.rowOddLeft;
+      const stR = isEven ? S.rowEvenRight : S.rowOddRight;
+      ws[`A${r}`].s = stL;
+
+      let ytdSum = 0;
+      monthCols.forEach((col, mIdx) => {
+        const colL = excelColLetter(1 + mIdx);
+        const val = col.entry ? Number(getMetricValueFromFin(col.entry.fin, row).toFixed(2)) : 0;
+        ytdSum += val;
+        ws[`${colL}${r}`] = { t: "n", v: val, z: '"R "#,##0.00', s: stR };
+      });
+
+      ws[`${ytdCol}${r}`] = {
+        t: "n",
+        f: `SUM(${firstMonthCol}${r}:${lastMonthCol}${r})`,
+        v: Number(ytdSum.toFixed(2)),
+        z: '"R "#,##0.00',
+        s: stR
+      };
+      rowHeights.push({ hpt: 19 });
+      return;
+    }
+
+    // Subtotals, KPIs & Final Profit
+    const stL = kind === "FINAL" ? S.finalLeft : (kind === "KPI" ? S.kpiLeft : S.subtotalLeft);
+    const stR = kind === "FINAL" ? S.finalRight : (kind === "KPI" ? S.kpiRight : S.subtotalRight);
+    ws[`A${r}`].s = stL;
+
+    let ytdVal = 0;
+    monthCols.forEach((col, mIdx) => {
+      const colL = excelColLetter(1 + mIdx);
+      const numVal = col.entry ? Number(getMetricValueFromFin(col.entry.fin, row).toFixed(2)) : 0;
+      ytdVal += numVal;
+
+      let formulaStr = null;
+      if (row.sec) {
+        const b = secRowBounds[row.sec];
+        if (b) formulaStr = `SUM(${colL}${b.first}:${colL}${b.last})`;
+      } else if (row.key === "GROSS_PROFIT") {
+        formulaStr = `${colL}${rowIndexMap["NET_TURNOVER"]}-${colL}${rowIndexMap["TOTAL_COGS"]}`;
+      } else if (row.key === "PRIME_COST") {
+        formulaStr = `${colL}${rowIndexMap["TOTAL_COGS"]}+${colL}${rowIndexMap["TOTAL_LABOUR"]}`;
+      } else if (row.key === "CONTROLLABLE_PROFIT") {
+        formulaStr = `${colL}${rowIndexMap["GROSS_PROFIT"]}-${colL}${rowIndexMap["TOTAL_LABOUR"]}-${colL}${rowIndexMap["TOTAL_OPEX"]}`;
+      } else if (row.key === "EBITDA") {
+        formulaStr = `${colL}${rowIndexMap["CONTROLLABLE_PROFIT"]}-${colL}${rowIndexMap["TOTAL_OCCUPANCY"]}`;
+      } else if (row.key === "NET_PROFIT") {
+        formulaStr = `${colL}${rowIndexMap["EBITDA"]}-${colL}${rowIndexMap["TOTAL_BELOW"]}`;
+      }
+
+      if (formulaStr) {
+        ws[`${colL}${r}`] = { t: "n", f: formulaStr, v: numVal, z: '"R "#,##0.00', s: stR };
+      } else {
+        ws[`${colL}${r}`] = { t: "n", v: numVal, z: '"R "#,##0.00', s: stR };
+      }
+    });
+
+    ws[`${ytdCol}${r}`] = {
+      t: "n",
+      f: `SUM(${firstMonthCol}${r}:${lastMonthCol}${r})`,
+      v: Number(ytdVal.toFixed(2)),
+      z: '"R "#,##0.00',
+      s: stR
+    };
+    rowHeights.push({ hpt: kind === "FINAL" ? 24 : 21 });
+  });
+
+  ws["!rows"] = rowHeights;
+  const colWidths = [{ wch: 48 }];
+  for (let i = 0; i < monthCols.length; i++) colWidths.push({ wch: 15 });
+  colWidths.push({ wch: 17 });
+  ws["!cols"] = colWidths;
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Month_over_Month_PnL");
+  const outName = `Sabino_Canyon_Spur_MoM_PnL_FY${fyDef.startYear}_${fyDef.startYear + 1}.xlsx`;
   XLSX.writeFile(wb, outName);
-  showToast(`Exported Month-over-Month Workbook: ${outName}`);
+  showToast(`Exported Spur Pegasus MoM Excel Workbook: ${outName}`);
 }
