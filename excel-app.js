@@ -1,6 +1,66 @@
 // ============================================================================
 // 9. NATIVE 3-TAB FORMULA EXCEL (.XLSX) & PDF REPORT EXPORT ENGINE
 // ============================================================================
+function buildExportAuditRows(fin) {
+  const rows = [];
+  activeReport.items.forEach(item => {
+    const suppressed = typeof isItemSuppressedByPilot === "function" && isItemSuppressedByPilot(activeReport, item);
+    const effCode = suppressed ? "EXCLUDE" : item.code;
+    const acc = ACCOUNT_MAP[effCode];
+    const effAmt = (!suppressed && fin.vatMode === "EXCL" && acc && acc.vatable)
+      ? Number((item.amount / 1.15).toFixed(2))
+      : item.amount;
+    const statusText = suppressed ? "Excluded – Replaced by Pilot POS" : item._status;
+    const noteText = suppressed
+      ? `Replaced by Pilot POS ${item.origSection === "Income" ? "Turnover (Excl. VAT)" : "Cost of Sales (Excl. VAT)"} — ${item.note}`
+      : item.note;
+
+    rows.push({
+      id: item.id,
+      origSection: item.origSection,
+      csvRow: item.csvRow,
+      vendor: item.vendor,
+      amount: effAmt,
+      code: effCode,
+      accName: acc ? acc.name : "UNMAPPED",
+      accGroup: acc ? acc.group : "CHECK",
+      status: statusText,
+      note: noteText
+    });
+  });
+
+  if (fin.pilotActive) {
+    const accRev = ACCOUNT_MAP["4010"];
+    const accCogs = ACCOUNT_MAP["5010"];
+    rows.push({
+      id: "PILOT-REV",
+      origSection: "Pilot POS",
+      csvRow: "PILOT",
+      vendor: "Pilot POS Turnover (Excl. VAT)",
+      amount: Number(fin.pilotTurnover.toFixed(2)),
+      code: "4010",
+      accName: accRev ? accRev.name : "Food & Beverage Sales (POS)",
+      accGroup: accRev ? accRev.group : "Revenue",
+      status: "Pilot POS Override (Excl. VAT)",
+      note: "Authoritative Pilot POS Turnover Excl. VAT (replaces cashbook Income rows)"
+    });
+    rows.push({
+      id: "PILOT-COGS",
+      origSection: "Pilot POS",
+      csvRow: "PILOT",
+      vendor: "Pilot POS Cost of Sales (Excl. VAT)",
+      amount: Number(fin.pilotCogs.toFixed(2)),
+      code: "5010",
+      accName: accCogs ? accCogs.name : "Cost of Sales - Food (Proteins, Dry & Groceries)",
+      accGroup: accCogs ? accCogs.group : "COGS",
+      status: "Pilot POS Override (Excl. VAT)",
+      note: "Authoritative Pilot POS Cost of Sales Excl. VAT (replaces cashbook COGS rows)"
+    });
+  }
+
+  return rows;
+}
+
 function exportThreeTabWorkbook() {
   const fin = computeFinancials();
   if (!fin) return;
@@ -12,7 +72,8 @@ function exportThreeTabWorkbook() {
   }
 
   const wb = XLSX.utils.book_new();
-  const auditCount = activeReport.items.length;
+  const exportAuditRows = buildExportAuditRows(fin);
+  const auditCount = exportAuditRows.length;
   const audStart = 5;
   const audEnd = audStart + auditCount - 1;
 
@@ -24,10 +85,14 @@ function exportThreeTabWorkbook() {
     return Math.abs(amt) >= 0.005 || cnt > 0;
   });
 
+  const basisLabel = fin.pilotActive
+    ? `Pilot POS Turnover & COGS (Excl. VAT) + Cashbook Expenses (${fin.vatMode === "EXCL" ? "15% VAT Stripped" : "Incl. 15% VAT"})`
+    : (fin.vatMode === "EXCL" ? "VAT-Exclusive (15% Stripped)" : "Cashbook / VAT-Inclusive");
+
   // TAB 1: 2026_Income_Statement (4 Columns: Account Name, Classification, Amount, % Turnover)
   const wsPnlData = [
     ["SABINO CANYON SPUR — 2026 INCOME STATEMENT (USAR STANDARD)"],
-    [`Source: ${activeReport.name} | Period: ${activeReport.period || "N/A"} | Basis: ${fin.vatMode === "EXCL" ? "VAT-Exclusive (15% Stripped)" : "Cashbook / VAT-Inclusive"}`],
+    [`Source: ${activeReport.name} | Period: ${activeReport.period || "N/A"} | Basis: ${basisLabel}`],
     [],
     ["2026 Spur Account Name", "P&L Classification", "Amount (ZAR)", "% of Turnover"]
   ];
@@ -111,7 +176,10 @@ function exportThreeTabWorkbook() {
         const rNp = rowIndexMap["NET_PROFIT"];
         const vatTerm = rowIndexMap["BS-VAT"] ? `-C${rowIndexMap["BS-VAT"]}` : "";
         const capTerm = rowIndexMap["BS-CAP"] ? `-C${rowIndexMap["BS-CAP"]}` : "";
-        const netCashFormula = `C${rNp}${vatTerm}${capTerm}-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"<>Income")+SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income")`;
+        const pilotAdjTerm = fin.pilotActive
+          ? `-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Pilot POS",'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"4010")+SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Pilot POS",'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"5010")`
+          : "";
+        const netCashFormula = `C${rNp}${vatTerm}${capTerm}-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"<>Income")+SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income")${pilotAdjTerm}`;
         setSub(netCashFormula, fin.netCashSurplus);
       }
     }
@@ -123,50 +191,43 @@ function exportThreeTabWorkbook() {
   // TAB 2: Vendor_Mapping_Audit
   const wsAudData = [
     ["SABINO CANYON SPUR — VENDOR & TRANSACTION MAPPING AUDIT TRAIL"],
-    ["Inflows Check:", 0, "Outflows Check:", 0, "Net Cash Check:", 0, "Unmapped:", 0, "Status:", ""],
+    ["CSV Inflows:", 0, "CSV Outflows:", 0, "Cashbook Surplus:", 0, "Unmapped:", 0, "Status:", ""],
     [],
-    ["Audit ID", "CSV Section", "CSV Row", "Vendor / Transaction Description", "Amount (ZAR)", "Mapped 2026 Code", "Mapped 2026 Account Name", "P&L Classification", "Reclassification Status", "Audit & Compliance Notes"]
+    ["Audit ID", "Source Section", "Row", "Vendor / Transaction Description", "Amount (ZAR)", "Mapped 2026 Code", "Mapped 2026 Account Name", "P&L Classification", "Reclassification Status", "Audit & Compliance Notes"]
   ];
 
-  activeReport.items.forEach(item => {
-    const acc = ACCOUNT_MAP[item.code];
-    const effAmt = (fin.vatMode === "EXCL" && acc && acc.vatable) ? Number((item.amount / 1.15).toFixed(2)) : item.amount;
+  exportAuditRows.forEach(r => {
     wsAudData.push([
-      item.id, item.origSection, item.csvRow, item.vendor, effAmt,
-      item.code, acc ? acc.name : "UNMAPPED", acc ? acc.group : "CHECK", item._status, item.note
+      r.id, r.origSection, r.csvRow, r.vendor, r.amount,
+      r.code, r.accName, r.accGroup, r.status, r.note
     ]);
   });
 
   const audTotRow = audEnd + 1;
-  wsAudData.push(["TOTAL", "", "", `All ${auditCount} Mapped Report Lines`, 0, "", "", "", "", ""]);
+  wsAudData.push(["TOTAL", "", "", `All ${auditCount} Audit & Override Lines`, 0, "", "", "", "", ""]);
 
   const wsAud = XLSX.utils.aoa_to_sheet(wsAudData);
   wsAud["B2"] = { t: "n", f: `SUMIF(B${audStart}:B${audEnd},"Income",E${audStart}:E${audEnd})`, v: Number(fin.rawInflows.toFixed(2)), z: '"R "#,##0.00' };
-  wsAud["D2"] = { t: "n", f: `SUMIF(B${audStart}:B${audEnd},"<>Income",E${audStart}:E${audEnd})`, v: Number(fin.rawOutflows.toFixed(2)), z: '"R "#,##0.00' };
+  wsAud["D2"] = { t: "n", f: `SUMIFS(E${audStart}:E${audEnd},B${audStart}:B${audEnd},"<>Income",B${audStart}:B${audEnd},"<>Pilot POS")`, v: Number(fin.rawOutflows.toFixed(2)), z: '"R "#,##0.00' };
   wsAud["F2"] = { t: "n", f: "B2-D2", v: Number(fin.netCashSurplus.toFixed(2)), z: '"R "#,##0.00' };
   wsAud["H2"] = { t: "n", f: `COUNTIF(G${audStart}:G${audEnd},"UNMAPPED")`, v: 0, z: "#,##0" };
   wsAud["J2"] = { t: "s", f: `IF(H2=0,"RECONCILED (0 UNMAPPED)","CHECK UNMAPPED")`, v: "RECONCILED (0 UNMAPPED)" };
 
-  activeReport.items.forEach((item, idx) => {
+  exportAuditRows.forEach((rowObj, idx) => {
     const r = audStart + idx;
-    const acc = ACCOUNT_MAP[item.code];
-    const effAmt = (fin.vatMode === "EXCL" && acc && acc.vatable) ? Number((item.amount / 1.15).toFixed(2)) : item.amount;
-    wsAud[`E${r}`] = { t: "n", v: effAmt, z: '"R "#,##0.00' };
-    wsAud[`G${r}`] = { t: "s", v: acc ? acc.name : "UNMAPPED" };
-    wsAud[`H${r}`] = { t: "s", v: acc ? acc.group : "CHECK" };
+    wsAud[`E${r}`] = { t: "n", v: rowObj.amount, z: '"R "#,##0.00' };
+    wsAud[`G${r}`] = { t: "s", v: rowObj.accName };
+    wsAud[`H${r}`] = { t: "s", v: rowObj.accGroup };
   });
 
   wsAud[`E${audTotRow}`] = {
     t: "n",
     f: `SUM(E${audStart}:E${audEnd})`,
-    v: Number(activeReport.items.reduce((s, i) => {
-      const acc = ACCOUNT_MAP[i.code];
-      return s + ((fin.vatMode === "EXCL" && acc && acc.vatable) ? i.amount / 1.15 : i.amount);
-    }, 0).toFixed(2)),
+    v: Number(exportAuditRows.reduce((s, r) => s + r.amount, 0).toFixed(2)),
     z: '"R "#,##0.00'
   };
 
-  wsAud["!cols"] = [{ wch: 11 }, { wch: 14 }, { wch: 9 }, { wch: 42 }, { wch: 16 }, { wch: 16 }, { wch: 44 }, { wch: 22 }, { wch: 28 }, { wch: 52 }];
+  wsAud["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 9 }, { wch: 42 }, { wch: 16 }, { wch: 16 }, { wch: 44 }, { wch: 22 }, { wch: 30 }, { wch: 54 }];
   XLSX.utils.book_append_sheet(wb, wsAud, "Vendor_Mapping_Audit");
 
   // TAB 3: Raw_vs_2026_Comparison
@@ -175,18 +236,18 @@ function exportThreeTabWorkbook() {
     ["Cross-Sheet Reconciled Variance Summary"],
     [],
     ["P&L Category / Metric", "Raw Report (ZAR)", "Raw %", "Reclassified 2026 (ZAR)", "2026 %", "Variance (ZAR)", "Primary Structural Driver"],
-    ["Net Turnover (Cash Inflows)", 0, 0, 0, 0, 0, "Top-line inflows (less any excluded revenue lines)"],
-    ["Cost of Sales (COGS)", 0, 0, 0, 0, 0, "Moves fresh produce (Market) & coffee beans into COGS; EasiShoppe moved to LP Gas"],
+    ["Net Turnover", 0, 0, 0, 0, 0, fin.pilotActive ? "Uses Pilot POS Turnover (Excl. VAT); cashbook Income rows suppressed" : "Top-line inflows (less any excluded revenue lines)"],
+    ["Cost of Sales (COGS)", 0, 0, 0, 0, 0, fin.pilotActive ? "Uses Pilot POS Cost of Sales (Excl. VAT); EasiShoppe kept in LP Gas (7220)" : "Moves fresh produce (Market) & coffee beans into COGS; EasiShoppe moved to LP Gas"],
     ["GROSS PROFIT (GP)", 0, 0, 0, 0, 0, "True store-level food & beverage margin"],
-    ["Labour & People Costs", 0, 0, 0, 0, 0, "Consolidates Staff Transport, Uber, Uniforms & LMS training"],
+    ["Labour & People Costs", 0, 0, 0, 0, 0, "Consolidates Staff Transport, Uber, Uniforms & LMS training (15% VAT retained)"],
     ["PRIME COST (COGS + LABOUR)", 0, 0, 0, 0, 0, "Core controllable restaurant benchmark"],
-    ["Controllable Operating Expenses", 0, 0, 0, 0, 0, "Includes Royalties, Nat. Marketing, Charity (7490) & EasiShoppe LP Gas; excludes Market & Transport"],
-    ["Occupancy & Debit Orders", 0, 0, 0, 0, 0, "Store rental, commercial insurance & unreconciled debit order gap"],
+    ["Controllable Operating Expenses", 0, 0, 0, 0, 0, "Includes Royalties, Nat. Marketing, Charity (7490) & EasiShoppe LP Gas (15% VAT retained)"],
+    ["Occupancy & Debit Orders", 0, 0, 0, 0, 0, "Store rental, commercial insurance & debit orders (15% VAT retained)"],
     ["EBITDA", 0, 0, 0, 0, 0, "True operating cash flow before interest, Balance Sheet VAT & Excluded items"],
     ["Non-OpEx / Finance Costs", 0, 0, 0, 0, 0, "Removes SARS VAT settlement & moves LSM/Maintenance to OpEx"],
-    ["NET PROFIT BEFORE TAX (P&L)", 0, 0, 0, 0, 0, "True P&L profit once Balance Sheet VAT & Excluded items are removed"],
-    ["Balance Sheet VAT & Excluded Items", 0, 0, 0, 0, 0, "SARS VAT liability, CapEx & items marked EXCLUDE outside P&L"],
-    ["RECONCILED NET CASH SURPLUS", 0, 0, 0, 0, 0, "Exact cash surplus reconciliation to source report"]
+    ["NET PROFIT BEFORE TAX (P&L)", 0, 0, 0, 0, 0, "True P&L profit once Pilot POS & Balance Sheet VAT adjustments are applied"],
+    [fin.pilotActive ? "Suppressed CSV Income/COGS & Non-P&L" : "Balance Sheet VAT & Excluded Items", 0, 0, 0, 0, 0, fin.pilotActive ? "Cashbook Income & COGS replaced by Pilot POS, plus SARS VAT & CapEx outside P&L" : "SARS VAT liability, CapEx & items marked EXCLUDE outside P&L"],
+    ["RECONCILED CASHBOOK SURPLUS", 0, 0, 0, 0, 0, "Exact cashbook surplus reconciliation to source report"]
   ];
 
   const wsCmp = XLSX.utils.aoa_to_sheet(wsCmpData);
@@ -201,11 +262,14 @@ function exportThreeTabWorkbook() {
   const rawEbitda = rawGP - rawLab - rawOpex - rawDebit;
   const rawNonOp = raw["NonOPEX"] || 0;
   const rawNet = rawEbitda - rawNonOp;
-  const totalNonPnl = fin.bsVat + fin.bsCap - fin.excludedNetCashAdj;
+  const totalNonPnl = fin.bsVat + fin.bsCap - fin.excludedNetCashAdj + (fin.pilotActive ? (fin.pilotTurnover - fin.pilotCogs) : 0);
 
   const vatRef = rowIndexMap["BS-VAT"] ? `'2026_Income_Statement'!C${rowIndexMap["BS-VAT"]}+` : "";
   const capRef = rowIndexMap["BS-CAP"] ? `'2026_Income_Statement'!C${rowIndexMap["BS-CAP"]}+` : "";
-  const nonPnlFormula = `${vatRef}${capRef}SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"<>Income")-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income")`;
+  const pilotBridgeTerm = fin.pilotActive
+    ? `+SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Pilot POS",'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"4010")-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Pilot POS",'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"5010")`
+    : "";
+  const nonPnlFormula = `${vatRef}${capRef}SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"<>Income")-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income")${pilotBridgeTerm}`;
 
   const cmpFormulas = [
     [5,  `SUMIF('Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income",'Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd})`, rawRev, `'2026_Income_Statement'!C${netRevRow}`, fin.netTurnover],
@@ -230,13 +294,13 @@ function exportThreeTabWorkbook() {
     wsCmp[`F${r}`] = { t: "n", f: `D${r}-B${r}`, v: Number((vD - vB).toFixed(2)), z: '"R "#,##0.00' };
   });
 
-  wsCmp["!cols"] = [{ wch: 34 }, { wch: 18 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 18 }, { wch: 56 }];
+  wsCmp["!cols"] = [{ wch: 36 }, { wch: 18 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 18 }, { wch: 58 }];
   XLSX.utils.book_append_sheet(wb, wsCmp, "Raw_vs_2026_Comparison");
 
   const safeTitle = activeReport.name.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/_+/g, "_");
   const outName = `Sabino_Canyon_Spur_2026_PnL_${safeTitle}.xlsx`;
   XLSX.writeFile(wb, outName);
-  showToast(`Exported 3-Tab Excel Workbook (Zero Lines Excluded): ${outName}`);
+  showToast(`Exported 3-Tab Excel Workbook: ${outName}`);
 }
 
 function exportOfflineCsv(fin) {
@@ -266,11 +330,13 @@ function exportStatementPdf(mode) {
     return;
   }
 
-  const taxLabel = fin.vatMode === "EXCL" ? "VAT-Exclusive (15% Stripped)" : "Cashbook / VAT-Inclusive";
+  const taxLabel = fin.pilotActive
+    ? `Pilot POS Turnover & COGS (Excl. VAT) + Cashbook Expenses (${fin.vatMode === "EXCL" ? "15% VAT Stripped" : "Incl. 15% VAT"})`
+    : (fin.vatMode === "EXCL" ? "VAT-Exclusive (15% Stripped)" : "Cashbook / VAT-Inclusive");
   const generatedDate = new Date().toLocaleDateString("en-ZA", { year: "numeric", month: "short", day: "numeric" });
 
   let title = `Sabino Canyon Spur — 2026 USAR Income Statement`;
-  let subtitle = `Report: ${escapeHtml(activeReport.name)} | Period: ${escapeHtml(activeReport.period || "N/A")} | Tax Basis: ${taxLabel} | Generated: ${generatedDate}`;
+  let subtitle = `Report: ${escapeHtml(activeReport.name)} | Period: ${escapeHtml(activeReport.period || "N/A")} | Basis: ${taxLabel} | Generated: ${generatedDate}`;
   let tableHtml = "";
 
   if (!isMom) {
@@ -281,7 +347,6 @@ function exportStatementPdf(mode) {
       EBITDA: fin.ebitda, TOTAL_BELOW: fin.totalBelow, NET_PROFIT: fin.netProfitBeforeTax,
       NET_CASH: fin.netCashSurplus
     };
-    // Always exclude R 0.00 GL lines from exported PDF Income Statement
     let rowsHtml = "";
     COA.forEach(row => {
       if (row.type === "HEADER") {
@@ -316,7 +381,7 @@ function exportStatementPdf(mode) {
     const { cols, monthFins } = buildMomColumns(fyDef);
     const detailMode = document.getElementById("momDetailSelect").value;
     title = `Sabino Canyon Spur — Month-over-Month P&L Comparison`;
-    subtitle = `${escapeHtml(fyDef.label)} | Tax Basis: ${taxLabel} | Generated: ${generatedDate}`;
+    subtitle = `${escapeHtml(fyDef.label)} | Basis: ${taxLabel} | Generated: ${generatedDate}`;
 
     let thHtml = `<tr><th>GL / Account Name</th>`;
     cols.forEach(c => { thHtml += `<th class="num">${escapeHtml(c.label)}</th>`; });
@@ -513,6 +578,77 @@ document.addEventListener("DOMContentLoaded", () => {
     if (typeof renderMomTab === "function") renderMomTab();
     showToast(`Assigned reporting period ${activeReport.period}`);
   });
+
+  // Pilot POS Override Mode Controls (Excl. VAT Turnover & COGS)
+  const chkPilotMode = document.getElementById("chkPilotMode");
+  if (chkPilotMode) {
+    chkPilotMode.addEventListener("change", (e) => {
+      if (!activeReport) return;
+      activeReport.pilotMode = e.target.checked;
+      autoSaveActiveState();
+      renderAll();
+      showToast(activeReport.pilotMode
+        ? "Pilot POS Mode ON — CSV Income & COGS replaced; expenses keep 15% VAT"
+        : "Pilot POS Mode OFF — Using Management Report Income & COGS");
+    });
+  }
+
+  const pilotTurnoverInput = document.getElementById("pilotTurnoverInput");
+  if (pilotTurnoverInput) {
+    pilotTurnoverInput.addEventListener("focus", function() { this.select(); });
+    pilotTurnoverInput.addEventListener("change", (e) => {
+      if (!activeReport) return;
+      const parsed = parseUserAmount(e.target.value);
+      if (parsed === null) {
+        showToast("Invalid Pilot Turnover amount entered");
+        e.target.value = Number(activeReport.pilotTurnoverExVat || 0).toFixed(2);
+        return;
+      }
+      activeReport.pilotTurnoverExVat = parsed;
+      if (Math.abs(parsed) >= 0.005 && !activeReport.pilotMode) {
+        activeReport.pilotMode = true;
+      }
+      autoSaveActiveState();
+      renderAll();
+      showToast(`Set Pilot Turnover (Excl. VAT) to ${fmtZar(parsed)}`);
+    });
+    pilotTurnoverInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        pilotTurnoverInput.dispatchEvent(new Event("change"));
+        const cogsEl = document.getElementById("pilotCogsInput");
+        if (cogsEl) { cogsEl.focus(); cogsEl.select(); }
+      }
+    });
+  }
+
+  const pilotCogsInput = document.getElementById("pilotCogsInput");
+  if (pilotCogsInput) {
+    pilotCogsInput.addEventListener("focus", function() { this.select(); });
+    pilotCogsInput.addEventListener("change", (e) => {
+      if (!activeReport) return;
+      const parsed = parseUserAmount(e.target.value);
+      if (parsed === null) {
+        showToast("Invalid Pilot Cost of Sales amount entered");
+        e.target.value = Number(activeReport.pilotCogsExVat || 0).toFixed(2);
+        return;
+      }
+      activeReport.pilotCogsExVat = parsed;
+      if (Math.abs(parsed) >= 0.005 && !activeReport.pilotMode) {
+        activeReport.pilotMode = true;
+      }
+      autoSaveActiveState();
+      renderAll();
+      showToast(`Set Pilot Cost of Sales (Excl. VAT) to ${fmtZar(parsed)}`);
+    });
+    pilotCogsInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        pilotCogsInput.dispatchEvent(new Event("change"));
+        pilotCogsInput.blur();
+      }
+    });
+  }
 
   document.getElementById("btnLoadSample").addEventListener("click", () => {
     const grid = parseCsvTextToGrid(SAMPLE_CSV_DATA);
