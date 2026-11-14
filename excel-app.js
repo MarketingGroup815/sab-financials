@@ -1,6 +1,14 @@
 // ============================================================================
 // 9. NATIVE 3-TAB FORMULA EXCEL (.XLSX) & PDF REPORT EXPORT ENGINE
 // ============================================================================
+function isNonPnlSectionRow(row) {
+  if (!row) return false;
+  if (row.sec === "BS" || row.type === "CASH" || row.key === "NET_CASH") return true;
+  if (row.code === "EXCLUDE" || (row.code && row.code.startsWith("BS-"))) return true;
+  if (row.type === "HEADER" && /BALANCE SHEET|EXCLUDED ITEMS/i.test(row.label || "")) return true;
+  return false;
+}
+
 function buildExportAuditRows(fin) {
   const rows = [];
   activeReport.items.forEach(item => {
@@ -77,8 +85,9 @@ function exportThreeTabWorkbook() {
   const audStart = 5;
   const audEnd = audStart + auditCount - 1;
 
-  // Filter out R 0.00 GL accounts so the exported Income Statement is clean & concise
+  // Exclude Section 7 (Balance Sheet & Excluded Items) and R 0.00 GL accounts from downloaded P&L
   const activePnlRows = COA.filter(item => {
+    if (isNonPnlSectionRow(item)) return false;
     if (!item.code) return true;
     const amt = fin.accTotals[item.code] || 0;
     const cnt = fin.accCounts[item.code] || 0;
@@ -172,15 +181,6 @@ function exportThreeTabWorkbook() {
         setSub(`C${rowIndexMap["CONTROLLABLE_PROFIT"]}-C${rowIndexMap["TOTAL_OCCUPANCY"]}`, fin.ebitda);
       } else if (item.key === "NET_PROFIT") {
         setSub(`C${rowIndexMap["EBITDA"]}-C${rowIndexMap["TOTAL_BELOW"]}`, fin.netProfitBeforeTax);
-      } else if (item.key === "NET_CASH") {
-        const rNp = rowIndexMap["NET_PROFIT"];
-        const vatTerm = rowIndexMap["BS-VAT"] ? `-C${rowIndexMap["BS-VAT"]}` : "";
-        const capTerm = rowIndexMap["BS-CAP"] ? `-C${rowIndexMap["BS-CAP"]}` : "";
-        const pilotAdjTerm = fin.pilotActive
-          ? `-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Pilot POS",'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"4010")+SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Pilot POS",'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"5010")`
-          : "";
-        const netCashFormula = `C${rNp}${vatTerm}${capTerm}-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"<>Income")+SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income")${pilotAdjTerm}`;
-        setSub(netCashFormula, fin.netCashSurplus);
       }
     }
   });
@@ -264,12 +264,11 @@ function exportThreeTabWorkbook() {
   const rawNet = rawEbitda - rawNonOp;
   const totalNonPnl = fin.bsVat + fin.bsCap - fin.excludedNetCashAdj + (fin.pilotActive ? (fin.pilotTurnover - fin.pilotCogs) : 0);
 
-  const vatRef = rowIndexMap["BS-VAT"] ? `'2026_Income_Statement'!C${rowIndexMap["BS-VAT"]}+` : "";
-  const capRef = rowIndexMap["BS-CAP"] ? `'2026_Income_Statement'!C${rowIndexMap["BS-CAP"]}+` : "";
+  const bsAuditSum = `SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"BS-VAT")+SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"BS-CAP")+`;
   const pilotBridgeTerm = fin.pilotActive
     ? `+SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Pilot POS",'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"4010")-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Pilot POS",'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"5010")`
     : "";
-  const nonPnlFormula = `${vatRef}${capRef}SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"<>Income")-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income")${pilotBridgeTerm}`;
+  const nonPnlFormula = `${bsAuditSum}SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"<>Income")-SUMIFS('Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd},'Vendor_Mapping_Audit'!$F$${audStart}:$F$${audEnd},"EXCLUDE",'Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income")${pilotBridgeTerm}`;
 
   const cmpFormulas = [
     [5,  `SUMIF('Vendor_Mapping_Audit'!$B$${audStart}:$B$${audEnd},"Income",'Vendor_Mapping_Audit'!$E$${audStart}:$E$${audEnd})`, rawRev, `'2026_Income_Statement'!C${netRevRow}`, fin.netTurnover],
@@ -306,6 +305,7 @@ function exportThreeTabWorkbook() {
 function exportOfflineCsv(fin) {
   let csvLines = ["2026 Spur Account Name,P&L Classification,Amount (ZAR),% Turnover"];
   COA.forEach(item => {
+    if (isNonPnlSectionRow(item)) return;
     if (item.code) {
       const amt = fin.accTotals[item.code] || 0;
       if (Math.abs(amt) < 0.005) return;
@@ -344,11 +344,11 @@ function exportStatementPdf(mode) {
       NET_TURNOVER: fin.netTurnover, TOTAL_COGS: fin.totalCogs, GROSS_PROFIT: fin.grossProfit,
       TOTAL_LABOUR: fin.totalLabour, PRIME_COST: fin.primeCost, TOTAL_OPEX: fin.totalOpex,
       CONTROLLABLE_PROFIT: fin.controllableProfit, TOTAL_OCCUPANCY: fin.totalOccupancy,
-      EBITDA: fin.ebitda, TOTAL_BELOW: fin.totalBelow, NET_PROFIT: fin.netProfitBeforeTax,
-      NET_CASH: fin.netCashSurplus
+      EBITDA: fin.ebitda, TOTAL_BELOW: fin.totalBelow, NET_PROFIT: fin.netProfitBeforeTax
     };
     let rowsHtml = "";
     COA.forEach(row => {
+      if (isNonPnlSectionRow(row)) return;
       if (row.type === "HEADER") {
         rowsHtml += `<tr class="sec"><td colspan="4">${escapeHtml(row.label)}</td></tr>`;
       } else if (row.code) {
@@ -363,7 +363,7 @@ function exportStatementPdf(mode) {
         </tr>`;
       } else {
         const val = subValues[row.key] || 0;
-        const cls = row.type === "FINAL" || row.type === "CASH" ? "final" : (row.type === "KPI" ? "kpi" : "sub");
+        const cls = row.type === "FINAL" ? "final" : (row.type === "KPI" ? "kpi" : "sub");
         rowsHtml += `<tr class="${cls}">
           <td></td>
           <td>${escapeHtml(row.label)}</td>
@@ -389,6 +389,7 @@ function exportStatementPdf(mode) {
 
     let tbHtml = "";
     COA.forEach(row => {
+      if (isNonPnlSectionRow(row)) return;
       if (row.type === "HEADER") {
         tbHtml += `<tr class="sec"><td colspan="${cols.length + 2}">${escapeHtml(row.label)}</td></tr>`;
         return;
@@ -401,7 +402,7 @@ function exportStatementPdf(mode) {
         });
         if (!anyNonZero) return;
       }
-      const cls = row.type === "FINAL" || row.type === "CASH" ? "final" : (row.type === "KPI" ? "kpi" : (row.type === "SUBTOTAL" ? "sub" : ""));
+      const cls = row.type === "FINAL" ? "final" : (row.type === "KPI" ? "kpi" : (row.type === "SUBTOTAL" ? "sub" : ""));
       const lbl = row.code ? `${row.code} — ${escapeHtml(row.name)}` : escapeHtml(row.label);
       let rHtml = `<tr class="${cls}"><td>${lbl}</td>`;
       let ytd = 0;
