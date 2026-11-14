@@ -61,6 +61,10 @@ function sanitizeReport(rep) {
   if (!rep.period || !/^\d{4}-\d{2}$/.test(rep.period)) {
     rep.period = inferPeriodFromText(rep.name, rep.savedAt);
   }
+  if (rep.pilotMode === undefined) rep.pilotMode = false;
+  if (rep.pilotTurnoverExVat === undefined) rep.pilotTurnoverExVat = 0;
+  if (rep.pilotCogsExVat === undefined) rep.pilotCogsExVat = 0;
+
   rep.items.forEach(item => {
     item.code = migrateLegacyCode(item.code);
     const vKey = normKey(item.vendor);
@@ -411,27 +415,45 @@ function parse2DGridToReport(grid, reportName) {
   });
 
   const nowIso = new Date().toISOString();
+  const prevPilotMode = activeReport ? Boolean(activeReport.pilotMode) : false;
+
   return {
     id: "rep_" + Date.now(),
     name: reportName,
     period: inferPeriodFromText(reportName, nowIso),
     savedAt: nowIso,
+    pilotMode: prevPilotMode,
+    pilotTurnoverExVat: 0,
+    pilotCogsExVat: 0,
     rawSectionTotals,
     items: extractedItems
   };
 }
 
 // ============================================================================
-// 5. FINANCIAL COMPUTATION ENGINE
+// 5. FINANCIAL COMPUTATION ENGINE (SUPPORTS PILOT POS EX-VAT OVERRIDE)
 // ============================================================================
 function isItemAmountEdited(item) {
   if (item.originalAmount === undefined) item.originalAmount = item.amount;
   return Math.abs(item.amount - item.originalAmount) >= 0.005;
 }
 
+function isItemSuppressedByPilot(rep, item) {
+  if (!rep || !rep.pilotMode) return false;
+  if (item.origSection === "Income") return true;
+  if (item.origSection === "COGS" && item.code !== "7220") return true;
+  const acc = ACCOUNT_MAP[item.code];
+  if (acc && acc.sec === "COGS") return true;
+  return false;
+}
+
 function computeFinancialsForReport(rep, vatModeOverride) {
   if (!rep) return null;
   const vatMode = vatModeOverride || document.getElementById("vatModeSelect").value;
+  const pilotActive = Boolean(rep.pilotMode);
+  const pilotTurnover = Number(rep.pilotTurnoverExVat || 0);
+  const pilotCogs = Number(rep.pilotCogsExVat || 0);
+
   const accTotals = {};
   const accCounts = {};
   const accVendors = {};
@@ -449,15 +471,43 @@ function computeFinancialsForReport(rep, vatModeOverride) {
   let flaggedCount = 0;
   let editedCount = 0;
   let excludedNetCashAdj = 0;
+  let pilotSuppressedIncome = 0;
+  let pilotSuppressedCogs = 0;
 
   rep.items.forEach(item => {
     if (isItemAmountEdited(item)) editedCount++;
-    const status = classifyStatus(item.origSection, item.code, item.autoMatched, item.isVarianceRow);
+    const suppressed = isItemSuppressedByPilot(rep, item);
+    const status = suppressed
+      ? "Excluded – Replaced by Pilot POS"
+      : classifyStatus(item.origSection, item.code, item.autoMatched, item.isVarianceRow);
     item._status = status;
-    if (status.includes("Audit Flag") || status.includes("Needs Review")) flaggedCount++;
+
+    if (!suppressed && (status.includes("Audit Flag") || status.includes("Needs Review"))) {
+      flaggedCount++;
+    }
 
     if (item.origSection === "Income") rawInflows += item.amount;
     else rawOutflows += item.amount;
+
+    if (suppressed) {
+      if (item.origSection === "Income") {
+        pilotSuppressedIncome += item.amount;
+        excludedNetCashAdj += item.amount;
+      } else {
+        pilotSuppressedCogs += item.amount;
+        excludedNetCashAdj -= item.amount;
+      }
+      accTotals["EXCLUDE"] += item.amount;
+      accCounts["EXCLUDE"] += 1;
+      accVendors["EXCLUDE"].push({
+        id: item.id,
+        vendor: `[CSV Replaced by Pilot] ${item.vendor}`,
+        amount: item.amount,
+        origSection: item.origSection,
+        code: "EXCLUDE"
+      });
+      return;
+    }
 
     const acc = ACCOUNT_MAP[item.code];
     let effectiveAmt = item.amount;
@@ -483,6 +533,29 @@ function computeFinancialsForReport(rep, vatModeOverride) {
     }
   });
 
+  // Inject Pilot POS Turnover (Excl. VAT) & Cost of Sales (Excl. VAT) at face value (no 1.15 division)
+  if (pilotActive) {
+    accTotals["4010"] += pilotTurnover;
+    accCounts["4010"] += 1;
+    accVendors["4010"].unshift({
+      id: "PILOT-REV",
+      vendor: "Pilot POS Turnover (Excl. VAT)",
+      amount: pilotTurnover,
+      origSection: "Pilot POS",
+      code: "4010"
+    });
+
+    accTotals["5010"] += pilotCogs;
+    accCounts["5010"] += 1;
+    accVendors["5010"].unshift({
+      id: "PILOT-COGS",
+      vendor: "Pilot POS Cost of Sales (Excl. VAT)",
+      amount: pilotCogs,
+      origSection: "Pilot POS",
+      code: "5010"
+    });
+  }
+
   const sumSec = (secName) => COA.filter(r => r.sec === secName && r.code).reduce((s, r) => s + (accTotals[r.code] || 0), 0);
 
   const netTurnover = sumSec("REV");
@@ -499,7 +572,9 @@ function computeFinancialsForReport(rep, vatModeOverride) {
   const bsVat = accTotals["BS-VAT"] || 0;
   const bsCap = accTotals["BS-CAP"] || 0;
   const bsExcl = accTotals["EXCLUDE"] || 0;
-  const netCashSurplus = netProfitBeforeTax - bsVat - bsCap + excludedNetCashAdj;
+  const netCashSurplus = pilotActive
+    ? (rawInflows - rawOutflows)
+    : (netProfitBeforeTax - bsVat - bsCap + excludedNetCashAdj);
 
   const expectedRawIn = (rep.rawSectionTotals && rep.rawSectionTotals["Income"]) || 0;
   const expectedRawOut = ["COGS", "OPEX", "NonOPEX", "Labour", "Debit Orders"].reduce((s, k) => s + ((rep.rawSectionTotals && rep.rawSectionTotals[k]) || 0), 0);
@@ -507,6 +582,11 @@ function computeFinancialsForReport(rep, vatModeOverride) {
 
   return {
     vatMode,
+    pilotActive,
+    pilotTurnover,
+    pilotCogs,
+    pilotSuppressedIncome,
+    pilotSuppressedCogs,
     accTotals,
     accCounts,
     accVendors,
