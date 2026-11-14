@@ -258,26 +258,26 @@ function exportThreeTabWorkbook() {
   const audStart = 5;
   const audEnd = audStart + auditCount - 1;
   const periodFull = formatFullMonthYear(activeReport.period);
+  const generatedDate = new Date().toLocaleDateString("en-ZA", { year: "numeric", month: "short", day: "numeric" });
 
   // Exclude Section 7 (Balance Sheet & Excluded Items) and R 0.00 GL accounts from downloaded P&L
   const activePnlRows = COA.filter(item => {
     if (isNonPnlSectionRow(item)) return false;
     if (!item.code) return true;
+    if (fin.pilotActive && (item.sec === "REV" || item.sec === "COGS") && item.code !== "4010" && item.code !== "5010") {
+      return false;
+    }
     const amt = fin.accTotals[item.code] || 0;
     const cnt = fin.accCounts[item.code] || 0;
     return Math.abs(amt) >= 0.005 || cnt > 0;
   });
-
-  const basisLabel = fin.pilotActive
-    ? `Pilot POS Turnover & COGS (Excl. VAT) + Cashbook Expenses (${fin.vatMode === "EXCL" ? "15% VAT Stripped" : "Incl. 15% VAT"})`
-    : (fin.vatMode === "EXCL" ? "VAT-Exclusive (15% Stripped)" : "Cashbook / VAT-Inclusive");
 
   // ==========================================================================
   // TAB 1: 2026_Income_Statement (Spur Pegasus Styled)
   // ==========================================================================
   const wsPnlData = [
     [`Sabino Canyon Spur - Income Statement ${periodFull}`.trim(), "", "", ""],
-    [`Source: ${activeReport.name} | Basis: ${basisLabel}`, "", "", ""],
+    [`Generated: ${generatedDate}`, "", "", ""],
     ["", "", "", ""],
     ["2026 Spur Account Name", "P&L Classification", "Amount (ZAR)", "% of Turnover"]
   ];
@@ -406,8 +406,8 @@ function exportThreeTabWorkbook() {
   // TAB 2: Vendor_Mapping_Audit (Spur Pegasus Styled)
   // ==========================================================================
   const wsAudData = [
-    [`Sabino Canyon Spur - Vendor & Transaction Mapping Audit (${periodFull})`, "", "", "", "", "", "", "", "", ""],
-    ["CSV Inflows:", 0, "CSV Outflows:", 0, "Cashbook Surplus:", 0, "Unmapped:", 0, "Status:", ""],
+    [`Sabino Canyon Spur - Vendor & Transaction Mapping Audit ${periodFull}`.trim(), "", "", "", "", "", "", "", "", ""],
+    ["CSV Inflows:", 0, "CSV Outflows:", 0, "Cashbook Surplus:", 0, "Unmapped:", 0, "Status:", `Generated: ${generatedDate}`],
     ["", "", "", "", "", "", "", "", "", ""],
     ["Audit ID", "Source Section", "Row", "Vendor / Transaction Description", "Amount (ZAR)", "Mapped 2026 Code", "Mapped 2026 Account Name", "P&L Classification", "Reclassification Status", "Audit & Compliance Notes"]
   ];
@@ -436,7 +436,7 @@ function exportThreeTabWorkbook() {
   wsAud["D2"] = { t: "n", f: `SUMIFS(E${audStart}:E${audEnd},B${audStart}:B${audEnd},"<>Income",B${audStart}:B${audEnd},"<>Pilot POS")`, v: Number(fin.rawOutflows.toFixed(2)), z: '"R "#,##0.00', s: PEGASUS_XLSX_STYLES.subtitle };
   wsAud["F2"] = { t: "n", f: "B2-D2", v: Number(fin.netCashSurplus.toFixed(2)), z: '"R "#,##0.00', s: PEGASUS_XLSX_STYLES.subtitle };
   wsAud["H2"] = { t: "n", f: `COUNTIF(G${audStart}:G${audEnd},"UNMAPPED")`, v: 0, z: "#,##0", s: PEGASUS_XLSX_STYLES.subtitle };
-  wsAud["J2"] = { t: "s", f: `IF(H2=0,"RECONCILED (0 UNMAPPED)","CHECK UNMAPPED")`, v: "RECONCILED (0 UNMAPPED)", s: PEGASUS_XLSX_STYLES.subtitle };
+  wsAud["J2"] = { t: "s", v: `Generated: ${generatedDate}`, s: PEGASUS_XLSX_STYLES.subtitle };
 
   exportAuditRows.forEach((rowObj, idx) => {
     const r = audStart + idx;
@@ -477,8 +477,8 @@ function exportThreeTabWorkbook() {
   // TAB 3: Raw_vs_2026_Comparison (Spur Pegasus Styled)
   // ==========================================================================
   const wsCmpData = [
-    [`Sabino Canyon Spur - Raw Report vs. 2026 P&L Bridge (${periodFull})`, "", "", "", "", "", ""],
-    ["Cross-Sheet Reconciled Variance Summary", "", "", "", "", "", ""],
+    [`Sabino Canyon Spur - Raw Report vs. 2026 P&L Bridge ${periodFull}`.trim(), "", "", "", "", "", ""],
+    [`Generated: ${generatedDate}`, "", "", "", "", "", ""],
     ["", "", "", "", "", "", ""],
     ["P&L Category / Metric", "Raw Report (ZAR)", "Raw %", "Reclassified 2026 (ZAR)", "2026 %", "Variance (ZAR)", "Primary Structural Driver"],
     ["Net Turnover", 0, 0, 0, 0, 0, fin.pilotActive ? "Uses Pilot POS Turnover (Excl. VAT); cashbook Income rows suppressed" : "Top-line inflows (less any excluded revenue lines)"],
@@ -582,7 +582,7 @@ function exportOfflineCsv(fin) {
 }
 
 // ============================================================================
-// 10. EXECUTIVE SPUR PEGASUS PDF EXPORT (CLEAN 2-COLUMN P&L & MONTH-OVER-MONTH)
+// 10. EXECUTIVE SPUR PEGASUS PDF EXPORT (CLEAN P&L & MONTH-OVER-MONTH)
 // ============================================================================
 function exportStatementPdf(mode) {
   const fin = computeFinancials();
@@ -596,13 +596,10 @@ function exportStatementPdf(mode) {
   }
 
   const periodFull = formatFullMonthYear(activeReport.period);
-  const taxLabel = fin.pilotActive
-    ? `Pilot POS Turnover & COGS (Excl. VAT) + Cashbook Expenses (${fin.vatMode === "EXCL" ? "15% VAT Stripped" : "Incl. 15% VAT"})`
-    : (fin.vatMode === "EXCL" ? "VAT-Exclusive (15% Stripped)" : "Cashbook / VAT-Inclusive");
   const generatedDate = new Date().toLocaleDateString("en-ZA", { year: "numeric", month: "short", day: "numeric" });
 
   let title = `Sabino Canyon Spur - Income Statement ${periodFull}`.trim();
-  let subtitle = `Basis: ${taxLabel} | Generated: ${generatedDate}`;
+  let subtitle = `Generated: ${generatedDate}`;
   let tableHtml = "";
 
   if (!isMom) {
@@ -621,6 +618,9 @@ function exportStatementPdf(mode) {
         rowsHtml += `<tr class="sec"><td colspan="2">${escapeHtml(cleanCat)}</td></tr>`;
         stripeIdx = 0;
       } else if (row.code) {
+        if (fin.pilotActive && (row.sec === "REV" || row.sec === "COGS") && row.code !== "4010" && row.code !== "5010") {
+          return;
+        }
         const amt = fin.accTotals[row.code] || 0;
         const cnt = fin.accCounts[row.code] || 0;
         if (Math.abs(amt) < 0.005 && cnt === 0) return;
@@ -645,49 +645,54 @@ function exportStatementPdf(mode) {
   } else {
     const fyDef = ensureMomFyOptions();
     const { cols, monthFins } = buildMomColumns(fyDef);
+    const monthCols = cols.filter(c => c.type === "MONTH");
     const detailMode = document.getElementById("momDetailSelect").value;
-    title = `Sabino Canyon Spur - Month-over-Month Income Statement`;
-    subtitle = `${escapeHtml(fyDef.label)} | Basis: ${taxLabel} | Generated: ${generatedDate}`;
+    const pilotToggled = Boolean(
+      (activeReport && activeReport.pilotMode) ||
+      fyDef.months.some(ym => monthFins[ym] && monthFins[ym].fin && monthFins[ym].fin.pilotActive)
+    );
+
+    title = `Sabino Canyon Spur - Month-over-Month Income Statement (${fyDef.label})`;
+    subtitle = ""; // Header Subline removed in MoM downloads
 
     let thHtml = `<tr><th>Account / Category</th>`;
-    cols.forEach(c => { thHtml += `<th class="num">${escapeHtml(c.label)}</th>`; });
+    monthCols.forEach(c => { thHtml += `<th class="num">${escapeHtml(c.label)}</th>`; });
     thHtml += `<th class="num">FY YTD</th></tr>`;
 
     let tbHtml = "";
+    let stripeIdx = 0;
     COA.forEach(row => {
       if (isNonPnlSectionRow(row)) return;
       if (row.type === "HEADER") {
         const cleanCat = stripCategoryCodeRange(row.label);
-        tbHtml += `<tr class="sec"><td colspan="${cols.length + 2}">${escapeHtml(cleanCat)}</td></tr>`;
+        tbHtml += `<tr class="sec"><td colspan="${monthCols.length + 2}">${escapeHtml(cleanCat)}</td></tr>`;
+        stripeIdx = 0;
         return;
       }
       if (row.code && detailMode === "SUMMARY") return;
       if (row.code) {
+        if (pilotToggled && (row.sec === "REV" || row.sec === "COGS") && row.code !== "4010" && row.code !== "5010") {
+          return;
+        }
+        const isPilotCore = pilotToggled && (row.code === "4010" || row.code === "5010");
         const anyNonZero = fyDef.months.some(ym => {
           const e = monthFins[ym];
           return e && Math.abs(e.fin.accTotals[row.code] || 0) >= 0.005;
         });
-        if (!anyNonZero) return;
+        if (!isPilotCore && !anyNonZero) return;
       }
-      const cls = row.type === "FINAL" ? "final" : (row.type === "KPI" ? "kpi" : (row.type === "SUBTOTAL" ? "sub" : ""));
+      const altCls = row.code && (stripeIdx++ % 2 === 1) ? "alt" : "";
+      const cls = row.type === "FINAL" ? "final" : (row.type === "KPI" ? "kpi" : (row.type === "SUBTOTAL" ? "sub" : altCls));
       const lbl = row.code ? escapeHtml(row.name) : escapeHtml(row.label);
       let rHtml = `<tr class="${cls}"><td>${lbl}</td>`;
       let ytd = 0;
-      cols.forEach(col => {
-        if (col.type === "MONTH") {
-          if (!col.entry) { rHtml += `<td class="num">&mdash;</td>`; }
-          else {
-            const val = getMetricValueFromFin(col.entry.fin, row);
-            ytd += val;
-            rHtml += `<td class="num">${fmtZar(val)}</td>`;
-          }
+      monthCols.forEach(col => {
+        if (!col.entry) {
+          rHtml += `<td class="num">&mdash;</td>`;
         } else {
-          if (!col.currEntry || !col.prevEntry) { rHtml += `<td class="num">&mdash;</td>`; }
-          else {
-            const diff = getMetricValueFromFin(col.currEntry.fin, row) - getMetricValueFromFin(col.prevEntry.fin, row);
-            const sign = diff > 0.004 ? "+" : "";
-            rHtml += `<td class="num">${sign}${fmtZar(diff)}</td>`;
-          }
+          const val = getMetricValueFromFin(col.entry.fin, row);
+          ytd += val;
+          rHtml += `<td class="num">${fmtZar(val)}</td>`;
         }
       });
       rHtml += `<td class="num"><strong>${fmtZar(ytd)}</strong></td></tr>`;
@@ -700,6 +705,7 @@ function exportStatementPdf(mode) {
   const pageCss = isMom
     ? "@page { size: A4 landscape; margin: 14mm; }"
     : "@page { size: A4 portrait; margin: 16mm; }";
+  const subHtml = subtitle ? `<p>${escapeHtml(subtitle)}</p>` : "";
 
   win.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(title)}</title>
     <style>
@@ -733,13 +739,13 @@ function exportStatementPdf(mode) {
         font-size: 16px;
         font-weight: 800;
         color: #ffffff;
-        margin: 0 0 4px;
+        margin: 0;
         letter-spacing: -0.01em;
       }
       .hdr p {
         font-size: 9.5px;
         color: #FDE68A;
-        margin: 0;
+        margin: 4px 0 0;
       }
       .badge {
         background: #C8102E;
@@ -814,7 +820,7 @@ function exportStatementPdf(mode) {
     <div class="hdr">
       <div>
         <h1>${escapeHtml(title)}</h1>
-        <p>${subtitle}</p>
+        ${subHtml}
       </div>
       <div class="badge">SABINO CANYON SPUR</div>
     </div>
