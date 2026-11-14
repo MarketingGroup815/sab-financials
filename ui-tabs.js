@@ -36,15 +36,33 @@ function renderAll() {
     periodInput.value = activeReport.period;
   }
 
+  // Sync Pilot POS Override Controls on Dashboard
+  const chkPilot = document.getElementById("chkPilotMode");
+  const inpPilotRev = document.getElementById("pilotTurnoverInput");
+  const inpPilotCogs = document.getElementById("pilotCogsInput");
+  const pilotGroup = document.getElementById("pilotInputsGroup");
+  if (chkPilot) chkPilot.checked = Boolean(activeReport.pilotMode);
+  if (inpPilotRev && document.activeElement !== inpPilotRev) {
+    inpPilotRev.value = Number(activeReport.pilotTurnoverExVat || 0).toFixed(2);
+  }
+  if (inpPilotCogs && document.activeElement !== inpPilotCogs) {
+    inpPilotCogs.value = Number(activeReport.pilotCogsExVat || 0).toFixed(2);
+  }
+  if (pilotGroup) {
+    pilotGroup.style.opacity = activeReport.pilotMode ? "1" : "0.65";
+  }
+
   // Inline Tab-Bar Pills + Dashboard Pills
   const reconEl = document.getElementById("reconPill");
   const dashReconEl = document.getElementById("dashReconPill");
   if (Math.abs(fin.reconDiff) < 0.01 && fin.editedCount === 0) {
     reconEl.className = "pill pill-green";
-    reconEl.textContent = "RECONCILED";
+    reconEl.textContent = fin.pilotActive ? "PILOT + CASH RECONCILED" : "RECONCILED";
     if (dashReconEl) {
       dashReconEl.className = "pill pill-green";
-      dashReconEl.textContent = "RECONCILED • R 0.00 DIFF";
+      dashReconEl.textContent = fin.pilotActive
+        ? "PILOT POS ACTIVE • CSV CASH RECONCILED"
+        : "RECONCILED • R 0.00 DIFF";
     }
   } else if (fin.editedCount > 0) {
     reconEl.className = "pill pill-gold";
@@ -82,10 +100,12 @@ function renderAll() {
 
   // 6 KPI Cards on Dashboard
   document.getElementById("kpiTurnover").textContent = fmtZar(fin.netTurnover);
-  document.getElementById("kpiTurnoverPct").textContent = fin.vatMode === "EXCL" ? "Excl. 15% VAT Basis" : "100.0% Cashbook Inflows";
+  document.getElementById("kpiTurnoverPct").textContent = fin.pilotActive
+    ? "Pilot POS Turnover (Excl. VAT)"
+    : (fin.vatMode === "EXCL" ? "Excl. 15% VAT Basis" : "100.0% Cashbook Inflows");
 
   document.getElementById("kpiGP").textContent = fmtZar(fin.grossProfit);
-  document.getElementById("kpiGPPct").textContent = `${fmtPct(fin.grossProfit, fin.netTurnover)} GP (COGS ${fmtPct(fin.totalCogs, fin.netTurnover)})`;
+  document.getElementById("kpiGPPct").textContent = `${fmtPct(fin.grossProfit, fin.netTurnover)} GP (${fin.pilotActive ? "Pilot COGS" : "COGS"} ${fmtPct(fin.totalCogs, fin.netTurnover)})`;
 
   document.getElementById("kpiPrime").textContent = fmtZar(fin.primeCost);
   document.getElementById("kpiPrimePct").textContent = `${fmtPct(fin.primeCost, fin.netTurnover)} of Turnover`;
@@ -97,7 +117,7 @@ function renderAll() {
   document.getElementById("kpiEbitdaPct").textContent = `${fmtPct(fin.ebitda, fin.netTurnover)} Operating Cash Flow`;
 
   document.getElementById("kpiNpbt").textContent = fmtZar(fin.netProfitBeforeTax);
-  document.getElementById("kpiNpbtPct").textContent = `${fmtPct(fin.netProfitBeforeTax, fin.netTurnover)} (VAT & Excl. Removed)`;
+  document.getElementById("kpiNpbtPct").textContent = `${fmtPct(fin.netProfitBeforeTax, fin.netTurnover)} (${fin.pilotActive ? "Expenses Incl. VAT" : "VAT & Excl. Removed"})`;
 
   document.getElementById("auditCountTab").textContent = activeReport.items.length;
 
@@ -114,8 +134,16 @@ function renderDashboardSummaries(fin) {
   const auditEl = document.getElementById("dashAuditSummary");
   if (!healthEl || !auditEl) return;
 
+  const pilotNoteRow = fin.pilotActive
+    ? `<div class="dash-kv-row" style="border-color:rgba(250,204,21,0.45);background:rgba(250,204,21,0.06);">
+        <span>Pilot POS Override Active (Excl. VAT)</span>
+        <strong style="color:var(--accent-gold);">Rev ${fmtZar(fin.pilotTurnover)} &bull; COGS ${fmtZar(fin.pilotCogs)}</strong>
+      </div>`
+    : "";
+
   const nonPnlTotal = fin.bsVat + fin.bsCap - fin.excludedNetCashAdj;
   healthEl.innerHTML = `
+    ${pilotNoteRow}
     <div class="dash-kv-row">
       <span>Total Cost of Sales (5000–5999)</span>
       <strong>${fmtZar(fin.totalCogs)} <span style="color:var(--text-secondary);font-weight:400;">(${fmtPct(fin.totalCogs, fin.netTurnover)})</span></strong>
@@ -133,11 +161,11 @@ function renderDashboardSummaries(fin) {
       <strong>${fmtZar(fin.totalOccupancy)} <span style="color:var(--text-secondary);font-weight:400;">(${fmtPct(fin.totalOccupancy, fin.netTurnover)})</span></strong>
     </div>
     <div class="dash-kv-row">
-      <span>Balance Sheet VAT &amp; Excluded Items</span>
+      <span>${fin.pilotActive ? "Suppressed CSV Income/COGS &amp; Non-P&L" : "Balance Sheet VAT &amp; Excluded Items"}</span>
       <strong style="color:#f87171;">${fmtZar(nonPnlTotal)}</strong>
     </div>
     <div class="dash-kv-row" style="border-color:var(--accent-gold);background:rgba(250,204,21,0.08);">
-      <span style="color:var(--accent-gold);font-weight:700;">Reconciled Net Cash Surplus</span>
+      <span style="color:var(--accent-gold);font-weight:700;">Reconciled Cashbook Net Surplus</span>
       <strong style="color:var(--accent-gold);">${fmtZar(fin.netCashSurplus)}</strong>
     </div>
   `;
@@ -154,14 +182,14 @@ function renderDashboardSummaries(fin) {
         <strong style="color:var(--status-amber);">${fmtZar(i.amount)}</strong>
       </div>`).join("")
     : `<div class="dash-kv-row" style="border-color:rgba(16,185,129,0.4);">
-        <span style="color:#34d399;">All ${activeReport.items.length} report lines cleanly mapped</span>
+        <span style="color:#34d399;">All active expense lines cleanly mapped</span>
         <strong style="color:#34d399;">0 Flags</strong>
       </div>`;
 
   auditEl.innerHTML = `
     <div class="dash-kv-row">
-      <span>Total Mapped Report Lines</span>
-      <strong>${activeReport.items.length} lines</strong>
+      <span>Total Management Report Lines</span>
+      <strong>${activeReport.items.length} lines${fin.pilotActive ? " (Income/COGS auto-replaced)" : ""}</strong>
     </div>
     <div class="dash-kv-row">
       <span>Saved Browser Rules / Split Templates</span>
@@ -218,16 +246,20 @@ function renderPnlTab(fin) {
       let vendorHtml = "";
       if (isExpanded && vendors.length > 0) {
         const sorted = [...vendors].sort((a, b) => b.amount - a.amount);
-        vendorHtml = `<div class="vendor-chips" onclick="event.stopPropagation()">` + sorted.map(v =>
-          `<div class="v-chip">
+        vendorHtml = `<div class="vendor-chips" onclick="event.stopPropagation()">` + sorted.map(v => {
+          const isPilotRow = v.id === "PILOT-REV" || v.id === "PILOT-COGS";
+          const actionCtrl = isPilotRow
+            ? `<span class="pill pill-gold" style="padding:1px 6px;font-size:10px;">Pilot POS Excl. VAT</span>`
+            : `<select class="v-chip-select" title="Move this transaction to another GL code"
+                onclick="event.stopPropagation()"
+                onchange="event.stopPropagation(); onChangeItemCode('${escapeAttr(v.id)}', this.value)">
+                ${buildAccountOptionsHtml(v.code)}
+              </select>`;
+          return `<div class="v-chip">
             <span class="v-chip-label">${escapeHtml(v.vendor)}: <strong>${fmtZar(v.amount)}</strong></span>
-            <select class="v-chip-select" title="Move this transaction to another GL code"
-              onclick="event.stopPropagation()"
-              onchange="event.stopPropagation(); onChangeItemCode('${escapeAttr(v.id)}', this.value)">
-              ${buildAccountOptionsHtml(v.code)}
-            </select>
-          </div>`
-        ).join("") + `</div>`;
+            ${actionCtrl}
+          </div>`;
+        }).join("") + `</div>`;
       }
 
       html += `<tr style="cursor:pointer;" onclick="toggleExpandAccount('${row.code}')">
@@ -287,17 +319,20 @@ function renderAuditTab(fin) {
 
   const filteredSum = filtered.reduce((s, x) => s + x.amount, 0);
   const editedTag = fin.editedCount > 0 ? ` | ${fin.editedCount} Edited` : "";
+  const pilotTag = fin.pilotActive ? ` | Pilot POS Mode ON (CSV Income/COGS Excluded)` : "";
   document.getElementById("auditSummaryStrip").textContent =
-    `Showing ${filtered.length} of ${activeReport.items.length} lines${editedTag} | Filtered Sum: ${fmtZar(filteredSum)}`;
+    `Showing ${filtered.length} of ${activeReport.items.length} lines${editedTag}${pilotTag} | Filtered Sum: ${fmtZar(filteredSum)}`;
 
   let html = "";
   filtered.forEach(item => {
     const edited = isItemAmountEdited(item);
     const matchingTpl = findTemplateForVendor(item.vendor);
+    const isPilotSuppressed = item._status === "Excluded – Replaced by Pilot POS";
+
     let rowCls = "";
     let pillCls = "pill-green";
     if (item._status.includes("Variance")) { rowCls = "row-flag-red"; pillCls = "pill-red"; }
-    else if (item.code === "EXCLUDE") { rowCls = "row-excluded"; pillCls = "pill-slate"; }
+    else if (isPilotSuppressed || item.code === "EXCLUDE") { rowCls = "row-excluded"; pillCls = "pill-slate"; }
     else if (item._status.includes("Excluded")) { rowCls = "row-flag-amber"; pillCls = "pill-red"; }
     else if (item._status.includes("Audit Flag") || item._status.includes("Needs Review")) { rowCls = "row-flag-amber"; pillCls = "pill-amber"; }
     else if (item._status.includes("Reclassified") || edited) { rowCls = "row-reclass"; pillCls = "pill-gold"; }
@@ -311,9 +346,15 @@ function renderAuditTab(fin) {
 
     const splitBtnCls = matchingTpl ? "btn-xs-gold" : "btn-xs";
     const splitBtnLabel = matchingTpl ? "Split ★" : "Split";
-    const splitBtnTitle = matchingTpl
-      ? `Saved Split Template "${matchingTpl.name}" available — click to apply or edit`
-      : "Split this line into multiple GL codes (e.g. Rent, Water, Electricity)";
+    const splitBtnTitle = isPilotSuppressed
+      ? "Auto-excluded while Pilot POS Mode is active"
+      : (matchingTpl
+        ? `Saved Split Template "${matchingTpl.name}" available — click to apply or edit`
+        : "Split this line into multiple GL codes (e.g. Rent, Water, Electricity)");
+
+    const displayNote = isPilotSuppressed
+      ? `Replaced by Pilot POS ${item.origSection === "Income" ? "Turnover (Excl. VAT)" : "Cost of Sales (Excl. VAT)"} — ${item.note}`
+      : item.note;
 
     html += `<tr class="${rowCls}">
       <td class="center" style="font-family:var(--font-mono);color:var(--text-secondary);">${escapeHtml(item.id)}</td>
@@ -335,14 +376,14 @@ function renderAuditTab(fin) {
         ${revertHtml}
       </td>
       <td>
-        <select class="gl-select" onchange="onChangeItemCode('${escapeAttr(item.id)}', this.value)">
-          ${buildAccountOptionsHtml(item.code)}
+        <select class="gl-select" ${isPilotSuppressed ? 'disabled title="Auto-excluded while Pilot POS Mode is active"' : ""} onchange="onChangeItemCode('${escapeAttr(item.id)}', this.value)">
+          ${buildAccountOptionsHtml(isPilotSuppressed ? "EXCLUDE" : item.code)}
         </select>
       </td>
       <td><span class="pill ${pillCls}">${escapeHtml(item._status)}</span></td>
-      <td style="font-size:11.5px;color:var(--text-secondary);">${escapeHtml(item.note)}</td>
+      <td style="font-size:11.5px;color:var(--text-secondary);">${escapeHtml(displayNote)}</td>
       <td class="center" style="white-space:nowrap;">
-        <button type="button" class="${splitBtnCls}" title="${escapeAttr(splitBtnTitle)}" onclick="openSplitModal('${escapeAttr(item.id)}')">${splitBtnLabel}</button>
+        <button type="button" class="${splitBtnCls}" ${isPilotSuppressed ? "disabled" : ""} title="${escapeAttr(splitBtnTitle)}" onclick="openSplitModal('${escapeAttr(item.id)}')">${splitBtnLabel}</button>
         <button type="button" class="btn-xs" style="color:#f87171;border-color:rgba(239,68,68,0.35);margin-left:3px;" title="Delete this audit line" onclick="deleteAuditLine('${escapeAttr(item.id)}')">Del</button>
       </td>
     </tr>`;
@@ -768,18 +809,42 @@ function renderCompareTab(fin) {
   const totalNonPnl = fin.bsVat + fin.bsCap - fin.excludedNetCashAdj;
 
   const rows = [
-    { label: "Net Turnover (Cash Inflows)", rVal: rawRev, nVal: fin.netTurnover, driver: "Top-line cash inflows (less any excluded revenue lines)", type: "NORMAL" },
-    { label: "Cost of Sales (COGS)", rVal: rawCogs, nVal: fin.totalCogs, driver: "Moves fresh produce (Market) & coffee beans into COGS; EasiShoppe moved to LP Gas", type: "NORMAL" },
+    {
+      label: "Net Turnover",
+      rVal: rawRev,
+      nVal: fin.netTurnover,
+      driver: fin.pilotActive
+        ? "Uses Pilot POS Turnover (Excl. VAT); cashbook Income lines suppressed"
+        : "Top-line cash inflows (less any excluded revenue lines)",
+      type: "NORMAL"
+    },
+    {
+      label: "Cost of Sales (COGS)",
+      rVal: rawCogs,
+      nVal: fin.totalCogs,
+      driver: fin.pilotActive
+        ? "Uses Pilot POS Cost of Sales (Excl. VAT); EasiShoppe kept in LP Gas (7220)"
+        : "Moves fresh produce (Market) & coffee beans into COGS; EasiShoppe moved to LP Gas",
+      type: "NORMAL"
+    },
     { label: "GROSS PROFIT (GP)", rVal: rawGP, nVal: fin.grossProfit, driver: "Reflects true store-level food & beverage margin", type: "SUB" },
-    { label: "Labour & People Costs", rVal: rawLabour, nVal: fin.totalLabour, driver: "Consolidates Staff Transport, Uber, Uniforms & LMS training", type: "NORMAL" },
+    { label: "Labour & People Costs", rVal: rawLabour, nVal: fin.totalLabour, driver: "Consolidates Staff Transport, Uber, Uniforms & LMS training (15% VAT retained)", type: "NORMAL" },
     { label: "PRIME COST (COGS + LABOUR)", rVal: rawPrime, nVal: fin.primeCost, driver: "Primary controllable restaurant benchmark", type: "KPI" },
-    { label: "Controllable Operating Expenses", rVal: rawOpex, nVal: fin.totalOpex, driver: "Includes Royalties, Nat. Marketing, Charity (7490) & EasiShoppe LP Gas; excludes Market & Transport", type: "NORMAL" },
-    { label: "Occupancy & Debit Orders", rVal: rawDebit, nVal: fin.totalOccupancy, driver: "Isolates store rental, commercial insurance & unreconciled debit order gap", type: "NORMAL" },
+    { label: "Controllable Operating Expenses", rVal: rawOpex, nVal: fin.totalOpex, driver: "Includes Royalties, Nat. Marketing, Charity (7490) & EasiShoppe LP Gas (15% VAT retained)", type: "NORMAL" },
+    { label: "Occupancy & Debit Orders", rVal: rawDebit, nVal: fin.totalOccupancy, driver: "Isolates store rental, commercial insurance & debit orders (15% VAT retained)", type: "NORMAL" },
     { label: "EBITDA", rVal: rawEbitda, nVal: fin.ebitda, driver: "True operating cash flow before interest, Balance Sheet VAT & Excluded items", type: "KPI" },
     { label: "Non-OpEx / Finance Costs", rVal: rawNonOpex, nVal: fin.totalBelow, driver: "Removes SARS VAT settlement & moves LSM/Maintenance to OpEx", type: "NORMAL" },
-    { label: "NET PROFIT BEFORE TAX (P&L)", rVal: rawNet, nVal: fin.netProfitBeforeTax, driver: "True P&L profit once Balance Sheet VAT & Excluded items are removed", type: "FINAL" },
-    { label: "Balance Sheet VAT & Excluded Items", rVal: 0, nVal: totalNonPnl, driver: "SARS VAT liability, CapEx & items marked EXCLUDE outside P&L", type: "NORMAL" },
-    { label: "RECONCILED NET CASH SURPLUS", rVal: rawNet, nVal: fin.netCashSurplus, driver: "Exact cash surplus reconciliation to adjusted audit lines", type: "FINAL" }
+    { label: "NET PROFIT BEFORE TAX (P&L)", rVal: rawNet, nVal: fin.netProfitBeforeTax, driver: "True P&L profit once Pilot POS & Balance Sheet VAT adjustments are applied", type: "FINAL" },
+    {
+      label: fin.pilotActive ? "Suppressed CSV Income/COGS & Non-P&L" : "Balance Sheet VAT & Excluded Items",
+      rVal: 0,
+      nVal: totalNonPnl,
+      driver: fin.pilotActive
+        ? "Cashbook Income & COGS replaced by Pilot POS, plus SARS VAT & CapEx outside P&L"
+        : "SARS VAT liability, CapEx & items marked EXCLUDE outside P&L",
+      type: "NORMAL"
+    },
+    { label: "RECONCILED CASHBOOK SURPLUS", rVal: rawNet, nVal: fin.netCashSurplus, driver: "Exact cashbook surplus reconciliation to source report", type: "FINAL" }
   ];
 
   const tbody = document.getElementById("compareTableBody");
